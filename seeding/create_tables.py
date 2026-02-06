@@ -1,4 +1,4 @@
-from sqlalchemy import String, Float, Integer, ForeignKey, Text, DateTime, func
+from sqlalchemy import String, Float, Integer, ForeignKey, Text, Boolean, DateTime, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from datetime import datetime
 
@@ -63,6 +63,7 @@ class Compounds(Base):
     literature_count: Mapped[int] = mapped_column(Integer)
     annotation_types: Mapped[str] = mapped_column(Text())
     annotation_type_count: Mapped[int] = mapped_column(Integer)
+    fda_approval: Mapped[bool] = mapped_column(Boolean)
     date_added: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -79,9 +80,29 @@ class Compounds(Base):
         lazy="selectin",
     )
 
+    compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
+        "CompoundBioAssays",
+        back_populates="compound",
+        cascade="all, delete-orphan",
+    )
+
+    bioassays: Mapped[list["BioAssays"]] = relationship(
+        "BioAssays",
+        secondary="compound_bioassays",
+        back_populates="compounds",
+        lazy="selectin",
+    )
+
+    toxicity: Mapped["Toxicity"] = relationship(
+        "Toxicity",
+        back_populates="compound",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
 
 class CompoundSynonyms(Base):
-    __tablename__ = "drug_synonyms"
+    __tablename__ = "compound_synonyms"
 
     synonym: Mapped[str] = mapped_column(String(700), primary_key=True)
     pubchem_cid: Mapped[int] = mapped_column(
@@ -96,6 +117,53 @@ class CompoundSynonyms(Base):
 
     ### ORM layer (fields below don't show up in table but are used in queries later on for convenience)
     compound: Mapped["Compounds"] = relationship(back_populates="synonyms")
+
+
+class CompoundBioAssays(Base):
+    __tablename__ = "compound_bioassays"
+
+    bioassay_aid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("bioassays.aid"),
+        primary_key=True,
+    )
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class BioAssays(Base):
+    __tablename__ = "bioassays"
+
+    aid: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    assay_name: Mapped[str] = mapped_column(String(512))
+    source_name: Mapped[str] = mapped_column(String(255))
+    source_id: Mapped[str] = mapped_column(String(255))
+    description_combined: Mapped[str] = mapped_column(Text)
+    protocol_combined: Mapped[str] = mapped_column(Text)
+    comment_combined: Mapped[str] = mapped_column(Text)
+    activity_outcome_method: Mapped[int] = mapped_column(Integer)
+    target_name: Mapped[str] = mapped_column(Text)
+    target_protein_accession: Mapped[str] = mapped_column(Text)
+
+
+class Toxicity(Base):
+    __tablename__ = "toxicity"
+
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    dili_severity_grade: Mapped[int] = mapped_column(Integer)
+    dili_annotation: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
 
 
 # https://www.ebi.ac.uk/chembl/api/data/drug/schema?format=json
