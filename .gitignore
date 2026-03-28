@@ -8,3 +8,4 @@ __pycache__
 .RData
 .DS_Store
 backup_data
+error_logs

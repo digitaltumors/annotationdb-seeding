@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: annotationdb-extract
+spec:
+  # Indexed completion mode: each pod gets a unique JOB_COMPLETION_INDEX (0..completions-1)
+  completionMode: Indexed
+  completions: 8       # Number of batches (match coordinator --max-batches)
+  parallelism: 8       # How many pods run at once
+  backoffLimit: 10       # Retry failed pods up to 10 times
+
+  template:
+    metadata:
+      labels:
+        app: annotationdb-extract
+    spec:
+      # No serviceAccountName needed — nodes already run as annotationdb-scraping SA
+      restartPolicy: Never
+
+      containers:
+      - name: extractor
+        image: bhklabmattbocc/annotationdb-r:v15
+        imagePullPolicy: Always
+        # entrypoint.sh reads JOB_COMPLETION_INDEX (auto-set by K8s) to pick batch
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "1.5Gi"
+          limits:
+            cpu: "1"
+            memory: "4Gi"

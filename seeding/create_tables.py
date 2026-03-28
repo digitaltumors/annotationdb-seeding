@@ -63,6 +63,8 @@ class Compounds(Base):
     literature_count: Mapped[int] = mapped_column(Integer)
     annotation_types: Mapped[str] = mapped_column(Text())
     annotation_type_count: Mapped[int] = mapped_column(Integer)
+    chembl_max_phase: Mapped[int] = mapped_column(Integer)
+    drug_like: Mapped[bool] = mapped_column(Boolean)
     fda_approval: Mapped[bool] = mapped_column(Boolean)
     date_added: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -77,7 +79,7 @@ class Compounds(Base):
         "ChemblMechanism",
         primaryjoin="Compounds.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
         back_populates="compound",
-        lazy="selectin",
+        lazy="noload",
     )
 
     compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
@@ -90,14 +92,13 @@ class Compounds(Base):
         "BioAssays",
         secondary="compound_bioassays",
         back_populates="compounds",
-        lazy="selectin",
+        lazy="noload",
     )
 
     toxicity: Mapped["Toxicity"] = relationship(
         "Toxicity",
         back_populates="compound",
-        uselist=False,
-        cascade="all, delete-orphan",
+        lazy="noload",
     )
 
 
@@ -133,6 +134,16 @@ class CompoundBioAssays(Base):
         primary_key=True,
     )
 
+    # ORM Layer
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="compound_bioassays",
+    )
+    bioassay: Mapped["BioAssays"] = relationship(
+        "BioAssays",
+        back_populates="compound_bioassays",
+    )
+
 
 class BioAssays(Base):
     __tablename__ = "bioassays"
@@ -152,6 +163,17 @@ class BioAssays(Base):
     target_name: Mapped[str] = mapped_column(Text)
     target_protein_accession: Mapped[str] = mapped_column(Text)
 
+    compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
+        "CompoundBioAssays",
+        back_populates="bioassay",
+    )
+
+    compounds: Mapped[list["Compounds"]] = relationship(
+        "Compounds",
+        secondary="compound_bioassays",
+        back_populates="bioassays",
+    )
+
 
 class Toxicity(Base):
     __tablename__ = "toxicity"
@@ -164,6 +186,11 @@ class Toxicity(Base):
     dili_severity_grade: Mapped[int] = mapped_column(Integer)
     dili_annotation: Mapped[str] = mapped_column(Text)
     hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="toxicity",
+    )
 
 
 # https://www.ebi.ac.uk/chembl/api/data/drug/schema?format=json
