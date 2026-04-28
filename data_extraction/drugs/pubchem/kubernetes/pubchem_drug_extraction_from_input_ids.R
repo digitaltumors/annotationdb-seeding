@@ -405,11 +405,7 @@ if (!is.null(inchikey_col)) res_inp[, inchikey := as.character(inp[[inchikey_col
 # ---------------------------
 # CID RESOLUTION (by InChIKey)
 # ---------------------------
-INVALID_CID_SENTINELS <- c("none found", "not found", "restricted", "na", "n/a", "null", "none")
-needs_res <- is.na(res_inp$cid) |
-    !nzchar(trimws(as.character(res_inp$cid))) |
-    res_inp$cid == "0" |
-    tolower(trimws(as.character(res_inp$cid))) %in% INVALID_CID_SENTINELS
+needs_res <- is.na(res_inp$cid) | !nzchar(trimws(as.character(res_inp$cid))) | res_inp$cid == "0"
 if (any(needs_res) && !is.null(inchikey_col)) {
     keys_to_res <- unique(res_inp[needs_res & !is.na(inchikey) & nzchar(inchikey), inchikey])
     if (length(keys_to_res) > 0) {
@@ -477,17 +473,20 @@ already_done_cids <- character()
 master_union_path <- "/tmp/work/master_union_out.csv"
 if (file.exists(master_union_path)) {
     printf("[%s] Loading existing coverage from master file %s...", ts(), master_union_path)
-    existing_union <- tryCatch({
-        fread(master_union_path, colClasses = "character")
-    }, error = function(e) {
-        msg <- sprintf("CRITICAL ERROR: Failed to read %s: %s", master_union_path, e$message)
-        write_error_log(error_log_path, "master_union_read_fail", master_union_path, msg)
-        stop(msg)
-    })
-    
+    existing_union <- tryCatch(
+        {
+            fread(master_union_path, colClasses = "character")
+        },
+        error = function(e) {
+            msg <- sprintf("CRITICAL ERROR: Failed to read %s: %s", master_union_path, e$message)
+            write_error_log(error_log_path, "master_union_read_fail", master_union_path, msg)
+            stop(msg)
+        }
+    )
+
     already_done_cids <- unique(canon_cid(existing_union$cid))
     printf("[%s] Found %d existing CIDs in master file.", ts(), length(already_done_cids))
-    
+
     # Subset to just the CIDs in this run
     existing_union <- existing_union[canon_cid(cid) %in% canon_cid(run_cids)]
     printf("[%s] Extracted %d fully cached rows for this specific batch.", ts(), nrow(existing_union))
@@ -675,26 +674,26 @@ if (!is.null(props_dt_all) && NROW(props_dt_all) > 0) {
 
 retry_http <- function(req_fun, times = 3, base_wait = 1.0) {
     if (.consecutive_api_blocks >= 10L) stop("API BLOCKED")
-    
+
     for (i in seq_len(times)) {
         res <- tryCatch(req_fun(), error = function(e) e)
-        
+
         if (inherits(res, "error")) {
             .consecutive_api_blocks <<- .consecutive_api_blocks + 1L
             if (i < times) Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.1))
             next
         }
-        
+
         sc <- httr::status_code(res)
         if (sc < 400) {
             .consecutive_api_blocks <<- 0L
             return(res)
         }
-        
+
         if (sc %in% c(429, 502, 503, 504, 404)) {
             .consecutive_api_blocks <<- .consecutive_api_blocks + 1L
         }
-        
+
         if (i < times) Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.1))
     }
     stop("retry failed")
@@ -762,14 +761,14 @@ annotate_chembl_id_one <- function(cid) {
         tryCatch(
             AnnotationGx::annotatePubchemCompound(cid_num, "ChEMBL ID"),
             error = function(e) {
-                if (grepl("httr2_http_|timeout|503|502|504|429", e$message, ignore.case=TRUE)) {
+                if (grepl("httr2_http_|timeout|503|502|504|429", e$message, ignore.case = TRUE)) {
                     api_blocked <<- TRUE
                 }
                 NULL
             }
         ),
         warning = function(w) {
-            if (grepl("httr2_http_|timeout|503|502|504|429", w$message, ignore.case=TRUE)) {
+            if (grepl("httr2_http_|timeout|503|502|504|429", w$message, ignore.case = TRUE)) {
                 api_blocked <<- TRUE
             }
         }
@@ -1012,14 +1011,13 @@ printf("[%s] Finalizing Props for union_out...", ts())
 # Combine freshly scraped properties with historical overlaps
 if (!is.null(existing_union) && nrow(existing_union) > 0) {
     if (!is.null(props_dt_all) && nrow(props_dt_all) > 0) {
-        props_dt_all <- rbind(props_dt_all, existing_union, fill=TRUE)
+        props_dt_all <- rbind(props_dt_all, existing_union, fill = TRUE)
     } else {
         props_dt_all <- existing_union
     }
 }
 
 if (!is.null(props_dt_all) && NROW(props_dt_all) > 0) {
-
     # Ensure schema alignment
     for (m in setdiff(UNION_OUT_FIELDS, names(props_dt_all))) props_dt_all[, (m) := NA]
     props_dt_all <- props_dt_all[, UNION_OUT_FIELDS, with = FALSE]

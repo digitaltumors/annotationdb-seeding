@@ -38,7 +38,7 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 compounds_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out_clean.csv"
+    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
 )
 
 # Remove any duplicate entries based on cids

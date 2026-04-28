@@ -252,6 +252,8 @@ class ChemblMechanism(Base):
     variant_sequence_sequence: Mapped[str] = mapped_column(Text())
     variant_sequence_tax_id: Mapped[int] = mapped_column(Integer)
     variant_sequence_version: Mapped[int] = mapped_column(Integer)
+    activity_id: Mapped[str] = mapped_column(String(15))
+    source: Mapped[str] = mapped_column(String(15))
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
