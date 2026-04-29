@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import pandas as pd
 import re
 import os
@@ -11,51 +12,171 @@ OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_mechanism.csv")
 print(f"Connecting to SQLite Database: {DB_PATH}...")
 conn = sqlite3.connect(DB_PATH)
 
-print("Fetching ALL drug mechanisms instantly from local DB...")
+# ── Source 1: drug_mechanism (curated, high-confidence) ──────────────────────
+print("Fetching ALL drug mechanisms from drug_mechanism table...")
 mech_query = """
-SELECT 
-    md.chembl_id AS molecule_chembl_id,
+SELECT
+    md.chembl_id                  AS molecule_chembl_id,
+    parent_md.chembl_id           AS parent_molecule_chembl_id,
     dm.action_type,
     dm.mechanism_of_action,
-    td.chembl_id AS target_chembl_id,
-    td.pref_name AS target_name,
+    dm.mechanism_comment,
+    dm.binding_site_comment,
+    dm.selectivity_comment,
+    dm.direct_interaction,
+    dm.disease_efficacy,
+    dm.molecular_mechanism,
+    md.max_phase,
     dm.record_id,
-    dm.mec_id
+    dm.mec_id,
+    dm.site_id,
+    td.chembl_id                  AS target_chembl_id,
+    td.pref_name                  AS target_name,
+    -- variant_sequence fields (flat, for internal use; JSON column added below)
+    vs.accession                  AS variant_sequence_accession,
+    vs.isoform                    AS variant_sequence_isoform,
+    vs.mutation                   AS variant_sequence_mutation,
+    vs.organism                   AS variant_sequence_organism,
+    vs.sequence                   AS variant_sequence_sequence,
+    vs.tax_id                     AS variant_sequence_tax_id,
+    vs.version                    AS variant_sequence_version,
+    CAST(NULL AS INTEGER)         AS activity_id,
+    'drug_mechanism'              AS source
 FROM drug_mechanism dm
 JOIN molecule_dictionary md ON dm.molregno = md.molregno
+LEFT JOIN molecule_hierarchy mh ON mh.molregno = md.molregno
+LEFT JOIN molecule_dictionary parent_md ON mh.parent_molregno = parent_md.molregno
 LEFT JOIN target_dictionary td ON dm.tid = td.tid
+LEFT JOIN variant_sequences vs ON dm.variant_id = vs.variant_id
 """
 mech_df = pd.read_sql(mech_query, conn)
+print(f"  drug_mechanism rows: {len(mech_df):,}  |  distinct mols: {mech_df['molecule_chembl_id'].nunique():,}")
 
-print("Fetching ALL molecule parent-child hierarchy mappings from local DB...")
-hier_query = """
-SELECT 
-    child.chembl_id AS child_id,
-    parent.chembl_id AS parent_id
-FROM molecule_hierarchy mh
-JOIN molecule_dictionary child ON mh.molregno = child.molregno
-JOIN molecule_dictionary parent ON mh.parent_molregno = parent.molregno
-WHERE child.chembl_id != parent.chembl_id
+# ── mechanism_refs: aggregate per mec_id → JSON array (matches AnnotationGx) ──
+print("Fetching mechanism_refs and aggregating to JSON per mec_id...")
+refs_query = """
+SELECT mec_id, ref_type, ref_id, ref_url
+FROM mechanism_refs
+ORDER BY mec_id, ref_type
 """
-hier_df = pd.read_sql(hier_query, conn)
+refs_df = pd.read_sql(refs_query, conn)
+
+def refs_to_json(grp):
+    return json.dumps(
+        grp[['ref_type', 'ref_id', 'ref_url']].to_dict(orient='records'),
+        default=str
+    )
+
+refs_json = (
+    refs_df.groupby('mec_id')
+    .apply(refs_to_json)
+    .reset_index()
+    .rename(columns={0: 'mechanism_refs'})
+)
+mech_df = mech_df.merge(refs_json, on='mec_id', how='left')
+# Rows with no refs get an empty JSON array (consistent with AnnotationGx nulls)
+mech_df['mechanism_refs'] = mech_df['mechanism_refs'].fillna('[]')
+print(f"  mechanism_refs attached for {refs_json['mec_id'].nunique():,} unique mec_ids")
+
+# ── Source 2: activities with action_type (broader coverage) ──────────────────
+print("Fetching mechanism data from activities table (action_type IS NOT NULL)...")
+act_query = """
+SELECT
+    md.chembl_id                  AS molecule_chembl_id,
+    parent_md.chembl_id           AS parent_molecule_chembl_id,
+    a.action_type,
+    asn.description               AS mechanism_of_action,
+    CAST(NULL AS TEXT)            AS mechanism_comment,
+    CAST(NULL AS TEXT)            AS binding_site_comment,
+    CAST(NULL AS TEXT)            AS selectivity_comment,
+    CAST(NULL AS INTEGER)         AS direct_interaction,
+    CAST(NULL AS INTEGER)         AS disease_efficacy,
+    CAST(NULL AS INTEGER)         AS molecular_mechanism,
+    md.max_phase,
+    a.record_id,
+    CAST(NULL AS INTEGER)         AS mec_id,
+    CAST(NULL AS INTEGER)         AS site_id,
+    td.chembl_id                  AS target_chembl_id,
+    td.pref_name                  AS target_name,
+    CAST(NULL AS TEXT)            AS variant_sequence_accession,
+    CAST(NULL AS INTEGER)         AS variant_sequence_isoform,
+    CAST(NULL AS TEXT)            AS variant_sequence_mutation,
+    CAST(NULL AS TEXT)            AS variant_sequence_organism,
+    CAST(NULL AS TEXT)            AS variant_sequence_sequence,
+    CAST(NULL AS INTEGER)         AS variant_sequence_tax_id,
+    CAST(NULL AS INTEGER)         AS variant_sequence_version,
+    a.activity_id,
+    'activities'                  AS source
+FROM activities a
+JOIN assays asn ON a.assay_id = asn.assay_id
+JOIN molecule_dictionary md ON a.molregno = md.molregno
+LEFT JOIN molecule_hierarchy mh ON mh.molregno = md.molregno
+LEFT JOIN molecule_dictionary parent_md ON mh.parent_molregno = parent_md.molregno
+LEFT JOIN target_dictionary td ON asn.tid = td.tid
+WHERE a.action_type IS NOT NULL AND a.action_type != ''
+"""
+act_df = pd.read_sql(act_query, conn)
+act_df['mechanism_refs'] = '[]'   # no curated refs for activities-sourced rows
+print(f"  activities rows: {len(act_df):,}  |  distinct mols: {act_df['molecule_chembl_id'].nunique():,}")
+
 conn.close()
 
-# Re-map using exact bi-directional logic as the R script
-print(f"Performing parent-child bidirectional remap for {len(mech_df)} mechanisms...")
-remap_1 = hier_df[['child_id', 'parent_id']].rename(columns={'child_id': 'from_id', 'parent_id': 'to_id'})
-remap_2 = hier_df[['parent_id', 'child_id']].rename(columns={'parent_id': 'from_id', 'child_id': 'to_id'})
+# ── Build variant_sequence JSON column (matches AnnotationGx's list-column) ───
+VS_COLS = {
+    'accession': 'variant_sequence_accession',
+    'isoform':   'variant_sequence_isoform',
+    'mutation':  'variant_sequence_mutation',
+    'organism':  'variant_sequence_organism',
+    'sequence':  'variant_sequence_sequence',
+    'tax_id':    'variant_sequence_tax_id',
+    'version':   'variant_sequence_version',
+}
+
+def build_variant_sequence_json(row):
+    """Serialize variant_sequence flat cols to a JSON object, or null if all empty."""
+    d = {k: row[v] for k, v in VS_COLS.items()}
+    if all(pd.isna(v) or v == '' for v in d.values()):
+        return None
+    return json.dumps({k: (None if pd.isna(v) else v) for k, v in d.items()})
+
+for df in (mech_df, act_df):
+    df['variant_sequence'] = df.apply(build_variant_sequence_json, axis=1)
+
+# ── Bidirectional parent-child remap ─────────────────────────────────────────
+print("Building parent-child remap table...")
+all_raw = pd.concat([mech_df, act_df], ignore_index=True)
+hier_pairs = (
+    all_raw[['molecule_chembl_id', 'parent_molecule_chembl_id']]
+    .dropna(subset=['parent_molecule_chembl_id'])
+    .query("molecule_chembl_id != parent_molecule_chembl_id")
+    .drop_duplicates()
+)
+remap_1 = hier_pairs.rename(columns={'molecule_chembl_id': 'from_id', 'parent_molecule_chembl_id': 'to_id'})
+remap_2 = hier_pairs.rename(columns={'parent_molecule_chembl_id': 'from_id', 'molecule_chembl_id': 'to_id'})
 remap_df = pd.concat([remap_1, remap_2]).drop_duplicates()
 
-mech_remapped = mech_df.merge(remap_df, left_on='molecule_chembl_id', right_on='from_id', how='inner')
-mech_remapped['molecule_chembl_id'] = mech_remapped['to_id']
-mech_remapped.drop(columns=['from_id', 'to_id'], inplace=True)
+def apply_remap(df, remap_df):
+    remapped = df.merge(remap_df, left_on='molecule_chembl_id', right_on='from_id', how='inner')
+    remapped['molecule_chembl_id'] = remapped['to_id']
+    remapped.drop(columns=['from_id', 'to_id'], inplace=True)
+    return remapped
 
-# Combine and drop duplicates globally
+print(f"Remapping drug_mechanism ({len(mech_df):,} rows) via hierarchy...")
+mech_remapped = apply_remap(mech_df, remap_df)
 all_mech_df = pd.concat([mech_df, mech_remapped]).drop_duplicates(subset=['molecule_chembl_id', 'mec_id'])
-print(f"Total mechanisms across universe mapped: {len(all_mech_df)}")
 
-# Load needed input IDs from CSV
-print(f"Loading query compounds from {INPUT_CSV}...")
+print(f"Remapping activities ({len(act_df):,} rows) via hierarchy...")
+act_remapped = apply_remap(act_df, remap_df)
+all_act_df = pd.concat([act_df, act_remapped]).drop_duplicates(subset=['molecule_chembl_id', 'activity_id'])
+
+# ── Combine both sources ──────────────────────────────────────────────────────
+all_combined = pd.concat([all_mech_df, all_act_df], ignore_index=True)
+print(f"\nCombined mechanism universe: {len(all_combined):,} rows  |  {all_combined['molecule_chembl_id'].nunique():,} distinct mols")
+print(f"  from drug_mechanism: {len(all_mech_df):,}")
+print(f"  from activities:     {len(all_act_df):,}")
+
+# ── Load union_out compound IDs ───────────────────────────────────────────────
+print(f"\nLoading query compounds from {INPUT_CSV}...")
 union_df = pd.read_csv(INPUT_CSV, low_memory=False)
 input_ids = set()
 for col in union_df.columns:
@@ -65,13 +186,16 @@ for col in union_df.columns:
         input_ids.update(matches)
 
 input_ids_df = pd.DataFrame({'molecule_chembl_id': list(input_ids)})
-print(f"Extracted {len(input_ids_df)} unique ChEMBL IDs from union_out.csv.")
+print(f"Extracted {len(input_ids_df):,} unique ChEMBL IDs from union_out.csv.")
 
-# Join mechanism universe with strictly our queried IDs
-final_mech_df = all_mech_df.merge(input_ids_df, on='molecule_chembl_id', how='inner')
+# ── Filter to our compounds ───────────────────────────────────────────────────
+final_mech_df = all_combined.merge(input_ids_df, on='molecule_chembl_id', how='inner')
+print(f"\nAfter filtering to union_out compounds: {len(final_mech_df):,} rows")
+print(f"  from drug_mechanism: {(final_mech_df['source'] == 'drug_mechanism').sum():,}")
+print(f"  from activities:     {(final_mech_df['source'] == 'activities').sum():,}")
 
-# Emulate `clean_mechanism_rows` logical filter
-print("Filtering rows missing description properties...")
+# ── Filter rows missing all description columns ───────────────────────────────
+print("Filtering rows missing all description properties...")
 desc_cols = ['action_type', 'mechanism_of_action', 'target_chembl_id', 'target_name']
 for col in desc_cols:
     final_mech_df[col] = final_mech_df[col].fillna('').astype(str).str.strip()
@@ -80,7 +204,47 @@ keep_mask = final_mech_df[desc_cols].astype(bool).any(axis=1)
 final_mech_df = final_mech_df[keep_mask]
 final_mech_df = final_mech_df.drop_duplicates()
 
-# Write strictly to output format
-print(f"Saving exactly {len(final_mech_df)} matching mechanism rows to {OUTPUT_CSV}...")
-final_mech_df.to_csv(OUTPUT_CSV, index=False, quoting=1) # Quote cleanly
-print("DONE! Mechanism extraction complete via SQLite in a fraction of a second!")
+# ── Reorder columns to match AnnotationGx output order ───────────────────────
+ANNOTATIONGX_COL_ORDER = [
+    'molecule_chembl_id',
+    'parent_molecule_chembl_id',
+    'action_type',
+    'binding_site_comment',
+    'direct_interaction',
+    'disease_efficacy',
+    'max_phase',
+    'mec_id',
+    'mechanism_comment',
+    'mechanism_of_action',
+    'mechanism_refs',
+    'molecular_mechanism',
+    'record_id',
+    'selectivity_comment',
+    'site_id',
+    'target_chembl_id',
+    'target_name',
+    'variant_sequence',
+    # flat variant columns kept for convenience
+    'variant_sequence_accession',
+    'variant_sequence_isoform',
+    'variant_sequence_mutation',
+    'variant_sequence_organism',
+    'variant_sequence_sequence',
+    'variant_sequence_tax_id',
+    'variant_sequence_version',
+    # extra columns from SQLite
+    'activity_id',
+    'source',
+]
+# Only keep columns that exist in the dataframe (safety)
+col_order = [c for c in ANNOTATIONGX_COL_ORDER if c in final_mech_df.columns]
+final_mech_df = final_mech_df[col_order]
+
+print(f"\nFinal rows after filtering: {len(final_mech_df):,}")
+print(f"  from drug_mechanism: {(final_mech_df['source'] == 'drug_mechanism').sum():,}")
+print(f"  from activities:     {(final_mech_df['source'] == 'activities').sum():,}")
+
+# ── Write output ──────────────────────────────────────────────────────────────
+print(f"\nSaving {len(final_mech_df):,} mechanism rows to {OUTPUT_CSV}...")
+final_mech_df.to_csv(OUTPUT_CSV, index=False, quoting=1)
+print("DONE!")
