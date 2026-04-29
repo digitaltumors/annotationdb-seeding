@@ -66,23 +66,24 @@ if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
     )
 
 compounds_bioassays_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_bioassays.csv"
+    "seeding/seeding_data/apr_29_2026/union_bioassays.csv"
 )
 
 bioassays_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_pubchem_assay_fields.csv"
+    "seeding/seeding_data/apr_29_2026/union_pubchem_assay_fields.csv"
 )
 
 toxicity_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/toxicity_output.csv"
+    "seeding/seeding_data/apr_29_2026/toxicity_output.csv"
 )
 
 chembl_mech_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/chembl_mechanism.csv"
+    "seeding/seeding_data/apr_29_2026/chembl_mechanism.csv"
 )
 
 valid_chembls = set(compounds_df["molecule_chembl_id"].dropna().astype(str))
 before = len(chembl_mech_df)
+chembl_mech_df = chembl_mech_df[chembl_mech_df["source"] == "drug_mechanism"]  # Filter verified mechanisms only
 chembl_mech_df = chembl_mech_df[
     chembl_mech_df["molecule_chembl_id"].astype(str).isin(valid_chembls)
 ]
@@ -133,7 +134,7 @@ if {"bioassay_aid", "pubchem_cid"}.issubset(compounds_bioassays_df.columns):
 # 2) Filter mapping rows to only those AIDs that exist in bioassays_df
 aids_in_bioassays = set(bioassays_df["aid"].dropna().astype(int))
 
-# --- NEW (tiny): actually apply the AID filter (this was missing) ---
+# Apply the AID filter
 compounds_bioassays_df["bioassay_aid"] = pd.to_numeric(
     compounds_bioassays_df["bioassay_aid"], errors="coerce"
 )
