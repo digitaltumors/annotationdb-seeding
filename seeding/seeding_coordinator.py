@@ -38,7 +38,7 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 compounds_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
+    "seeding/seeding_data/apr_29_2026/union_out.csv"
 )
 
 # Remove any duplicate entries based on cids
@@ -50,8 +50,10 @@ if "cid" in compounds_df.columns:
         f"[Cleanup] Removed {before - after} duplicate cid rows; kept {after} unique entries."
     )
 
+compounds_df["fda_approval"] = compounds_df["chembl_max_phase"] == 4
+
 synonyms_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_synonyms.csv"
+    "seeding/seeding_data/apr_29_2026/union_synonyms.csv"
 )
 
 # Remove any duplicate synonym entries based on cid/synonym combos
