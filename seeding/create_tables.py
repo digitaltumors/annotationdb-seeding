@@ -255,6 +255,7 @@ class ChemblMechanism(Base):
     variant_sequence_version: Mapped[int] = mapped_column(Integer)
     # activity_id: Mapped[str] = mapped_column(String(15))
     source: Mapped[str] = mapped_column(String(15))
+    inferred_from_parent: Mapped[bool] = mapped_column(Boolean)
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
