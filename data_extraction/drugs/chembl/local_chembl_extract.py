@@ -5,8 +5,8 @@ import re
 import os
 
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
-INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing/data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
-OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing/data_extraction/drugs/pubchem/output_data/union/mar-27-2026"
+INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
+OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/output_data/union/mar-27-2026"
 OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_mechanism.csv")
 
 print(f"Connecting to SQLite Database: {DB_PATH}...")
@@ -78,46 +78,17 @@ mech_df = mech_df.merge(refs_json, on='mec_id', how='left')
 mech_df['mechanism_refs'] = mech_df['mechanism_refs'].fillna('[]')
 print(f"  mechanism_refs attached for {refs_json['mec_id'].nunique():,} unique mec_ids")
 
-# ── Source 2: activities with action_type (broader coverage) ──────────────────
-print("Fetching mechanism data from activities table (action_type IS NOT NULL)...")
-act_query = """
+
+print("Fetching complete molecule hierarchy for parent-child remap...")
+hier_query = """
 SELECT
-    md.chembl_id                  AS molecule_chembl_id,
-    parent_md.chembl_id           AS parent_molecule_chembl_id,
-    a.action_type,
-    asn.description               AS mechanism_of_action,
-    CAST(NULL AS TEXT)            AS mechanism_comment,
-    CAST(NULL AS TEXT)            AS binding_site_comment,
-    CAST(NULL AS TEXT)            AS selectivity_comment,
-    CAST(NULL AS INTEGER)         AS direct_interaction,
-    CAST(NULL AS INTEGER)         AS disease_efficacy,
-    CAST(NULL AS INTEGER)         AS molecular_mechanism,
-    md.max_phase,
-    a.record_id,
-    CAST(NULL AS INTEGER)         AS mec_id,
-    CAST(NULL AS INTEGER)         AS site_id,
-    td.chembl_id                  AS target_chembl_id,
-    td.pref_name                  AS target_name,
-    CAST(NULL AS TEXT)            AS variant_sequence_accession,
-    CAST(NULL AS INTEGER)         AS variant_sequence_isoform,
-    CAST(NULL AS TEXT)            AS variant_sequence_mutation,
-    CAST(NULL AS TEXT)            AS variant_sequence_organism,
-    CAST(NULL AS TEXT)            AS variant_sequence_sequence,
-    CAST(NULL AS INTEGER)         AS variant_sequence_tax_id,
-    CAST(NULL AS INTEGER)         AS variant_sequence_version,
-    a.activity_id,
-    'activities'                  AS source
-FROM activities a
-JOIN assays asn ON a.assay_id = asn.assay_id
-JOIN molecule_dictionary md ON a.molregno = md.molregno
-LEFT JOIN molecule_hierarchy mh ON mh.molregno = md.molregno
-LEFT JOIN molecule_dictionary parent_md ON mh.parent_molregno = parent_md.molregno
-LEFT JOIN target_dictionary td ON asn.tid = td.tid
-WHERE a.action_type IS NOT NULL AND a.action_type != ''
+    md.chembl_id AS molecule_chembl_id,
+    parent_md.chembl_id AS parent_molecule_chembl_id
+FROM molecule_hierarchy mh
+JOIN molecule_dictionary md ON mh.molregno = md.molregno
+JOIN molecule_dictionary parent_md ON mh.parent_molregno = parent_md.molregno
 """
-act_df = pd.read_sql(act_query, conn)
-act_df['mechanism_refs'] = '[]'   # no curated refs for activities-sourced rows
-print(f"  activities rows: {len(act_df):,}  |  distinct mols: {act_df['molecule_chembl_id'].nunique():,}")
+hier_df = pd.read_sql(hier_query, conn)
 
 conn.close()
 
@@ -139,14 +110,13 @@ def build_variant_sequence_json(row):
         return None
     return json.dumps({k: (None if pd.isna(v) else v) for k, v in d.items()})
 
-for df in (mech_df, act_df):
-    df['variant_sequence'] = df.apply(build_variant_sequence_json, axis=1)
+mech_df['variant_sequence'] = mech_df.apply(build_variant_sequence_json, axis=1)
+mech_df['inferred_from_parent'] = False
 
 # ── Bidirectional parent-child remap ─────────────────────────────────────────
 print("Building parent-child remap table...")
-all_raw = pd.concat([mech_df, act_df], ignore_index=True)
 hier_pairs = (
-    all_raw[['molecule_chembl_id', 'parent_molecule_chembl_id']]
+    hier_df[['molecule_chembl_id', 'parent_molecule_chembl_id']]
     .dropna(subset=['parent_molecule_chembl_id'])
     .query("molecule_chembl_id != parent_molecule_chembl_id")
     .drop_duplicates()
@@ -158,6 +128,8 @@ remap_df = pd.concat([remap_1, remap_2]).drop_duplicates()
 def apply_remap(df, remap_df):
     remapped = df.merge(remap_df, left_on='molecule_chembl_id', right_on='from_id', how='inner')
     remapped['molecule_chembl_id'] = remapped['to_id']
+    # It should only be inferred if the new ID is NOT the parent ID
+    remapped['inferred_from_parent'] = remapped['molecule_chembl_id'] != remapped['parent_molecule_chembl_id']
     remapped.drop(columns=['from_id', 'to_id'], inplace=True)
     return remapped
 
@@ -165,15 +137,10 @@ print(f"Remapping drug_mechanism ({len(mech_df):,} rows) via hierarchy...")
 mech_remapped = apply_remap(mech_df, remap_df)
 all_mech_df = pd.concat([mech_df, mech_remapped]).drop_duplicates(subset=['molecule_chembl_id', 'mec_id'])
 
-print(f"Remapping activities ({len(act_df):,} rows) via hierarchy...")
-act_remapped = apply_remap(act_df, remap_df)
-all_act_df = pd.concat([act_df, act_remapped]).drop_duplicates(subset=['molecule_chembl_id', 'activity_id'])
 
 # ── Combine both sources ──────────────────────────────────────────────────────
-all_combined = pd.concat([all_mech_df, all_act_df], ignore_index=True)
+all_combined = all_mech_df
 print(f"\nCombined mechanism universe: {len(all_combined):,} rows  |  {all_combined['molecule_chembl_id'].nunique():,} distinct mols")
-print(f"  from drug_mechanism: {len(all_mech_df):,}")
-print(f"  from activities:     {len(all_act_df):,}")
 
 # ── Load union_out compound IDs ───────────────────────────────────────────────
 print(f"\nLoading query compounds from {INPUT_CSV}...")
@@ -191,8 +158,6 @@ print(f"Extracted {len(input_ids_df):,} unique ChEMBL IDs from union_out.csv.")
 # ── Filter to our compounds ───────────────────────────────────────────────────
 final_mech_df = all_combined.merge(input_ids_df, on='molecule_chembl_id', how='inner')
 print(f"\nAfter filtering to union_out compounds: {len(final_mech_df):,} rows")
-print(f"  from drug_mechanism: {(final_mech_df['source'] == 'drug_mechanism').sum():,}")
-print(f"  from activities:     {(final_mech_df['source'] == 'activities').sum():,}")
 
 # ── Filter rows missing all description columns ───────────────────────────────
 print("Filtering rows missing all description properties...")
@@ -203,6 +168,9 @@ for col in desc_cols:
 keep_mask = final_mech_df[desc_cols].astype(bool).any(axis=1)
 final_mech_df = final_mech_df[keep_mask]
 final_mech_df = final_mech_df.drop_duplicates()
+
+# Ensure max_phase is an integer
+final_mech_df['max_phase'] = pd.to_numeric(final_mech_df['max_phase'], errors='coerce').round().astype('Int64')
 
 # ── Reorder columns to match AnnotationGx output order ───────────────────────
 ANNOTATIONGX_COL_ORDER = [
@@ -235,14 +203,13 @@ ANNOTATIONGX_COL_ORDER = [
     # extra columns from SQLite
     'activity_id',
     'source',
+    'inferred_from_parent',
 ]
 # Only keep columns that exist in the dataframe (safety)
 col_order = [c for c in ANNOTATIONGX_COL_ORDER if c in final_mech_df.columns]
 final_mech_df = final_mech_df[col_order]
 
 print(f"\nFinal rows after filtering: {len(final_mech_df):,}")
-print(f"  from drug_mechanism: {(final_mech_df['source'] == 'drug_mechanism').sum():,}")
-print(f"  from activities:     {(final_mech_df['source'] == 'activities').sum():,}")
 
 # ── Write output ──────────────────────────────────────────────────────────────
 print(f"\nSaving {len(final_mech_df):,} mechanism rows to {OUTPUT_CSV}...")
