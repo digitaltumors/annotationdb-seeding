@@ -26,7 +26,7 @@ from pathlib import Path
 # Configuration
 # ============================================================================
 BUCKET = "gs://annotationdb_data_retrieval"
-DEFAULT_INPUT_CSV = f"{BUCKET}/input/LINCS_needed.csv"
+DEFAULT_INPUT_CSV = f"{BUCKET}/input/clinical_compounds.csv"
 OUTPUT_PREFIX = f"{BUCKET}/output"
 BATCHES_PREFIX = f"{BUCKET}/batches"
 
