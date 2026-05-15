@@ -5,8 +5,8 @@ metadata:
 spec:
   # Indexed completion mode: each pod gets a unique JOB_COMPLETION_INDEX (0..completions-1)
   completionMode: Indexed
-  completions: 8       # Number of batches (match coordinator --max-batches)
-  parallelism: 8       # How many pods run at once
+  completions: 4       # Number of batches (match coordinator --max-batches)
+  parallelism: 4       # How many pods run at once
   backoffLimit: 10       # Retry failed pods up to 10 times
 
   template:
@@ -19,7 +19,7 @@ spec:
 
       containers:
       - name: extractor
-        image: bhklabmattbocc/annotationdb-r:latest
+        image: bhklabmattbocc/annotationdb-r:v4
         imagePullPolicy: Always
         # entrypoint.sh reads JOB_COMPLETION_INDEX (auto-set by K8s) to pick batch
 
