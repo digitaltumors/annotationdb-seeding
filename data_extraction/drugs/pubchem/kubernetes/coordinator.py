@@ -26,7 +26,7 @@ from pathlib import Path
 # Configuration
 # ============================================================================
 BUCKET = "gs://annotationdb_data_retrieval"
-INPUT_CSV = f"{BUCKET}/input/LINCS_needed.csv"
+DEFAULT_INPUT_CSV = f"{BUCKET}/input/LINCS_needed.csv"
 OUTPUT_PREFIX = f"{BUCKET}/output"
 BATCHES_PREFIX = f"{BUCKET}/batches"
 
@@ -200,6 +200,8 @@ def update_completed_aids_reference(dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="GKE Batch Coordinator")
+    parser.add_argument("--in_csv", type=str, default=DEFAULT_INPUT_CSV,
+                        help=f"Master input CSV in GCS (default: {DEFAULT_INPUT_CSV})")
     parser.add_argument("--batch-size", type=int, default=1000,
                         help="Number of input IDs per batch (default: 1000)")
     parser.add_argument("--max-batches", type=int, default=5,
@@ -214,10 +216,10 @@ def main():
     update_completed_aids_reference(dry_run=args.dry_run)
 
     # ---- Load master CSV ----
-    print(f"[coordinator] Loading master CSV from {INPUT_CSV} ...")
-    master_text = gsutil_cat(INPUT_CSV)
+    print(f"[coordinator] Loading master CSV from {args.in_csv} ...")
+    master_text = gsutil_cat(args.in_csv)
     if master_text is None:
-        print(f"ERROR: Could not read {INPUT_CSV}", file=sys.stderr)
+        print(f"ERROR: Could not read {args.in_csv}", file=sys.stderr)
         sys.exit(1)
 
     master_rows = load_master_ids(master_text)

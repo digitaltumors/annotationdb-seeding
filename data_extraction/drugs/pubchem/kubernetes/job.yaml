@@ -19,7 +19,7 @@ spec:
 
       containers:
       - name: extractor
-        image: bhklabmattbocc/annotationdb-r:v15
+        image: bhklabmattbocc/annotationdb-r:latest
         imagePullPolicy: Always
         # entrypoint.sh reads JOB_COMPLETION_INDEX (auto-set by K8s) to pick batch
 

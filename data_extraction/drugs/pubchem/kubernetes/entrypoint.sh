@@ -60,6 +60,9 @@ Rscript /app/assay_extraction_input_ids.R \
     echo "WARNING: assay_extraction had errors (non-fatal, will be retried in future runs)"
 
 # ---- Step 3: Toxicity extraction ----
+# Produces two output files per batch:
+#   toxicity_dili_output.csv  — long/tidy DILI rows (one per reference × field)
+#   toxicity_hep_output.csv   — hepatotoxicity likelihood scores
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running toxicity_extraction_input_ids.R ..."
 Rscript /app/toxicity_extraction_input_ids.R \
     --batch_input_ids "$BATCH_CSV" \

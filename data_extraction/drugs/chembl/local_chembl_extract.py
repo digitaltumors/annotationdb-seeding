@@ -5,8 +5,8 @@ import re
 import os
 
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
-INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
-OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/output_data/union/mar-27-2026"
+INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_12_2026/union_out.csv"
+OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_12_2026"
 OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_mechanism.csv")
 
 print(f"Connecting to SQLite Database: {DB_PATH}...")

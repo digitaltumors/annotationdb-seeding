@@ -25,24 +25,24 @@ library(jsonlite)
 library(data.table)
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
-ts     <- function() format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+ts <- function() format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
 # ---------------------------------------------------------------------------
 # Priority-ordered field name lists (lowercase, matched case-insensitively)
 # ---------------------------------------------------------------------------
 SEVERITY_NAMES <- c(
-    "severity class",        # DILIrank 2.0
-    "severity grade",        # older DILIrank
-    "dili severity score",   # LTKB benchmark
+    "severity class", # DILIrank 2.0
+    "severity grade", # older DILIrank
+    "dili severity score", # LTKB benchmark
     "dili_severity_score",
     "dili severity grade"
 )
 
 ANNOTATION_NAMES <- c(
-    "vdili-concern",         # DILIrank 2.0 (v-prefixed)
+    "vdili-concern", # DILIrank 2.0 (v-prefixed)
     "dili-concern",
-    "dili annotation",       # older DILIrank
-    "dili concern",          # LTKB benchmark
+    "dili annotation", # older DILIrank
+    "dili concern", # LTKB benchmark
     "dilist classification", # DILIst dataset
     "dili label",
     "concern"
@@ -56,38 +56,53 @@ DATASET_NAMES <- c(
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 batch_input_ids_csv <- NULL
-out_dir_override    <- NULL
-union_out_override  <- NULL
-shard_index         <- 0L
-num_shards          <- 1L
+out_dir_override <- NULL
+union_out_override <- NULL
+shard_index <- 0L
+num_shards <- 1L
 
 args <- commandArgs(trailingOnly = TRUE)
 i <- 1L
 while (i <= length(args)) {
-    if      (args[i] == "--batch_input_ids" && i < length(args)) { batch_input_ids_csv <- args[i+1L]; i <- i+2L
-    } else if (args[i] == "--out_dir"        && i < length(args)) { out_dir_override    <- args[i+1L]; i <- i+2L
-    } else if (args[i] == "--union_out"      && i < length(args)) { union_out_override  <- args[i+1L]; i <- i+2L
-    } else if (args[i] == "--shard_index"    && i < length(args)) { shard_index <- as.integer(args[i+1L]); i <- i+2L
-    } else if (args[i] == "--num_shards"     && i < length(args)) { num_shards  <- as.integer(args[i+1L]); i <- i+2L
-    } else { i <- i+1L }
+    if (args[i] == "--batch_input_ids" && i < length(args)) {
+        batch_input_ids_csv <- args[i + 1L]
+        i <- i + 2L
+    } else if (args[i] == "--out_dir" && i < length(args)) {
+        out_dir_override <- args[i + 1L]
+        i <- i + 2L
+    } else if (args[i] == "--union_out" && i < length(args)) {
+        union_out_override <- args[i + 1L]
+        i <- i + 2L
+    } else if (args[i] == "--shard_index" && i < length(args)) {
+        shard_index <- as.integer(args[i + 1L])
+        i <- i + 2L
+    } else if (args[i] == "--num_shards" && i < length(args)) {
+        num_shards <- as.integer(args[i + 1L])
+        i <- i + 2L
+    } else {
+        i <- i + 1L
+    }
 }
 
 if (num_shards < 1L) stop("--num_shards must be >= 1")
-if (shard_index < 0L || shard_index >= num_shards)
+if (shard_index < 0L || shard_index >= num_shards) {
     stop("--shard_index must be in 0..(num_shards-1)")
+}
 
 out_dir <- if (!is.null(out_dir_override)) out_dir_override else "output_data/union/complete"
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 prop_out <- if (!is.null(union_out_override)) union_out_override else file.path(out_dir, "union_out.csv")
 out_file <- file.path(out_dir, "toxicity_output.csv")
-err_log  <- file.path(out_dir, "toxicity_errors.csv")
+err_log <- file.path(out_dir, "toxicity_errors.csv")
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 append_csv <- function(df, path) {
-    if (is.null(df) || nrow(df) == 0L) return(invisible(NULL))
+    if (is.null(df) || nrow(df) == 0L) {
+        return(invisible(NULL))
+    }
     if (file.exists(path)) {
         write.table(df, path,
             sep = ",", row.names = FALSE, col.names = FALSE,
@@ -100,23 +115,25 @@ append_csv <- function(df, path) {
 
 log_error <- function(pubchem_cid, detail) {
     append_csv(data.frame(
-        time        = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        time = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
         pubchem_cid = as.character(pubchem_cid),
-        detail      = as.character(detail),
+        detail = as.character(detail),
         stringsAsFactors = FALSE
     ), err_log)
 }
 
-empty_row <- function(pubchem_cid) data.frame(
-    pubchem_cid                     = pubchem_cid,
-    reference_number                = NA_character_,
-    dili_dataset                    = NA_character_,
-    dili_severity_grade             = NA_character_,
-    dili_annotation                 = NA_character_,
-    dili_source_url                 = NA_character_,
-    hepatotoxicity_likelihood_score = NA_character_,
-    stringsAsFactors                = FALSE
-)
+empty_row <- function(pubchem_cid) {
+    data.frame(
+        pubchem_cid                     = pubchem_cid,
+        reference_number                = NA_character_,
+        dili_dataset                    = NA_character_,
+        dili_severity_grade             = NA_character_,
+        dili_annotation                 = NA_character_,
+        dili_source_url                 = NA_character_,
+        hepatotoxicity_likelihood_score = NA_character_,
+        stringsAsFactors                = FALSE
+    )
+}
 
 # Match a field name against a priority list (case-insensitive)
 matches_any <- function(name, priority_list) {
@@ -127,12 +144,17 @@ matches_any <- function(name, priority_list) {
 # Resume: which CIDs are already done?
 # ---------------------------------------------------------------------------
 get_done_cids <- function(path) {
-    if (!file.exists(path)) return(character(0))
+    if (!file.exists(path)) {
+        return(character(0))
+    }
     dt <- tryCatch(fread(path, fill = TRUE), error = function(e) NULL)
-    if (is.null(dt) || !nrow(dt)) return(character(0))
-    col <- if ("pubchem_cid" %in% names(dt)) "pubchem_cid" else
-           if ("cid"         %in% names(dt)) "cid"         else NULL
-    if (is.null(col)) return(character(0))
+    if (is.null(dt) || !nrow(dt)) {
+        return(character(0))
+    }
+    col <- if ("pubchem_cid" %in% names(dt)) "pubchem_cid" else if ("cid" %in% names(dt)) "cid" else NULL
+    if (is.null(col)) {
+        return(character(0))
+    }
     done <- unique(trimws(as.character(dt[[col]])))
     done[nzchar(done) & done != "0"]
 }
@@ -155,16 +177,21 @@ get_batch_cids <- function(props_dt, batch_input_ids_csv) {
         return(out[nzchar(out) & out != "0"])
     }
     if (!file.exists(batch_input_ids_csv)) stop("batch_input_ids file not found: ", batch_input_ids_csv)
-    b  <- fread(batch_input_ids_csv, fill = TRUE)
+    b <- fread(batch_input_ids_csv, fill = TRUE)
     cn <- names(b)
     id_col <- NULL
     for (cand in c("input_id", "inputId", "substance", "name", "drug", "synonym")) {
-        if (cand %in% cn) { id_col <- cand; break }
+        if (cand %in% cn) {
+            id_col <- cand
+            break
+        }
     }
     if (is.null(id_col)) id_col <- cn[1L]
     batch_ids <- unique(trimws(as.character(b[[id_col]])))
     batch_ids <- batch_ids[nzchar(batch_ids)]
-    if (!length(batch_ids)) return(character(0))
+    if (!length(batch_ids)) {
+        return(character(0))
+    }
     u_exp <- props_dt[, .(input_id = unlist(strsplit(as.character(mapped_name), ";\\s*"))), by = cid]
     u_exp[, input_id := trimws(input_id)]
     out <- unique(u_exp[input_id %in% batch_ids, cid])
@@ -176,13 +203,13 @@ all_cids <- get_batch_cids(props, batch_input_ids_csv)
 # Deterministic sharding
 all_cids <- sort(all_cids)
 if (num_shards > 1L) {
-    idx      <- which((seq_along(all_cids) - 1L) %% num_shards == shard_index)
+    idx <- which((seq_along(all_cids) - 1L) %% num_shards == shard_index)
     all_cids <- all_cids[idx]
     cat(sprintf("[%s] Shard %d/%d → %d CIDs assigned\n", ts(), shard_index + 1L, num_shards, length(all_cids)))
 }
 
-done  <- get_done_cids(out_file)
-todo  <- setdiff(all_cids, done)
+done <- get_done_cids(out_file)
+todo <- setdiff(all_cids, done)
 
 cat(sprintf(
     "[%s] Toxicity — total: %d | already done: %d | remaining: %d\n",
@@ -197,12 +224,12 @@ cat(sprintf(
 # Build a lookup from ReferenceNumber -> list(source_name, url)
 build_ref_lookup <- function(x) {
     refs <- x$Record$Reference %||% list()
-    lut  <- list()
+    lut <- list()
     for (r in refs) {
         num <- as.character(r$ReferenceNumber %||% "NA")
         lut[[num]] <- list(
             source_name = r$SourceName %||% NA_character_,
-            url         = r$URL         %||% NA_character_
+            url         = r$URL %||% NA_character_
         )
     }
     lut
@@ -211,10 +238,12 @@ build_ref_lookup <- function(x) {
 find_sections <- function(sections, heading) {
     results <- list()
     for (sec in sections) {
-        if (!is.null(sec$TOCHeading) && sec$TOCHeading == heading)
+        if (!is.null(sec$TOCHeading) && sec$TOCHeading == heading) {
             results <- c(results, list(sec))
-        if (!is.null(sec$Section))
+        }
+        if (!is.null(sec$Section)) {
             results <- c(results, find_sections(sec$Section, heading))
+        }
     }
     results
 }
@@ -246,8 +275,14 @@ get_tox <- function(pubchem_cid) {
         .consecutive_blocks <<- 0L
     }
 
-    if (inherits(resp, "error")) { log_error(pubchem_cid, resp$message);              return(empty_row(pubchem_cid)) }
-    if (http_error(resp))        { log_error(pubchem_cid, paste("HTTP", status_code(resp))); return(empty_row(pubchem_cid)) }
+    if (inherits(resp, "error")) {
+        log_error(pubchem_cid, resp$message)
+        return(empty_row(pubchem_cid))
+    }
+    if (http_error(resp)) {
+        log_error(pubchem_cid, paste("HTTP", status_code(resp)))
+        return(empty_row(pubchem_cid))
+    }
 
     x <- tryCatch(content(resp, as = "parsed", type = "application/json"), error = function(e) e)
     if (inherits(x, "error") || is.null(x$Record$Section)) {
@@ -255,23 +290,23 @@ get_tox <- function(pubchem_cid) {
         return(empty_row(pubchem_cid))
     }
 
-    ref_lookup   <- build_ref_lookup(x)
+    ref_lookup <- build_ref_lookup(x)
     all_sections <- x$Record$Section %||% list()
 
     # ---- DILI: scan all Information entries, pick by priority name match ----
-    dili_sections  <- find_sections(all_sections, "Drug Induced Liver Injury")
+    dili_sections <- find_sections(all_sections, "Drug Induced Liver Injury")
     severity_grade <- NA_character_
 
     # Group Information entries by ReferenceNumber, preserving insertion order
-    ref_order  <- character(0)   # ordered unique ref nums
-    ref_groups <- list()          # ref_num -> list of (name, value)
+    ref_order <- character(0) # ordered unique ref nums
+    ref_groups <- list() # ref_num -> list of (name, value)
 
     for (sec in dili_sections) {
         if (is.null(sec$Information)) next
         for (info in sec$Information) {
-            nm      <- info$Name %||% NA_character_
+            nm <- info$Name %||% NA_character_
             ref_num <- as.character(info$ReferenceNumber %||% "NA")
-            swm     <- info$Value$StringWithMarkup
+            swm <- info$Value$StringWithMarkup
             if (is.na(nm) || is.null(swm) || length(swm) == 0L) next
             val <- paste(
                 Filter(nzchar, vapply(swm, function(s) s$String %||% "", character(1))),
@@ -289,28 +324,28 @@ get_tox <- function(pubchem_cid) {
     # Build one row per reference
     dili_rows <- list()
     for (ref_num in ref_order) {
-        entries    <- ref_groups[[ref_num]]
-        sev_grade  <- NA_character_
-        ann        <- NA_character_
-        dataset    <- NA_character_
-        ref_entry  <- ref_lookup[[ref_num]]
+        entries <- ref_groups[[ref_num]]
+        sev_grade <- NA_character_
+        ann <- NA_character_
+        dataset <- NA_character_
+        ref_entry <- ref_lookup[[ref_num]]
         source_url <- if (!is.null(ref_entry)) ref_entry$url %||% NA_character_ else NA_character_
 
         for (e in entries) {
-            if (is.na(sev_grade) && matches_any(e$name, SEVERITY_NAMES))  sev_grade <- e$value
-            if (is.na(ann)       && matches_any(e$name, ANNOTATION_NAMES)) ann       <- e$value
-            if (is.na(dataset)   && matches_any(e$name, DATASET_NAMES))    dataset   <- e$value
+            if (is.na(sev_grade) && matches_any(e$name, SEVERITY_NAMES)) sev_grade <- e$value
+            if (is.na(ann) && matches_any(e$name, ANNOTATION_NAMES)) ann <- e$value
+            if (is.na(dataset) && matches_any(e$name, DATASET_NAMES)) dataset <- e$value
         }
 
         # Only emit a row if the reference contributed at least one meaningful DILI field
         if (!is.na(dataset) || !is.na(sev_grade) || !is.na(ann)) {
             dili_rows[[length(dili_rows) + 1L]] <- data.frame(
-                pubchem_cid      = pubchem_cid,
+                pubchem_cid = pubchem_cid,
                 reference_number = ref_num,
-                dili_dataset     = dataset,
+                dili_dataset = dataset,
                 dili_severity_grade = sev_grade,
-                dili_annotation  = ann,
-                dili_source_url  = source_url,
+                dili_annotation = ann,
+                dili_source_url = source_url,
                 stringsAsFactors = FALSE
             )
         }
@@ -318,7 +353,7 @@ get_tox <- function(pubchem_cid) {
 
     # ---- Hepatotoxicity: extract "Likelihood score: X" string ----
     hep_sections <- find_sections(all_sections, "Hepatotoxicity")
-    hep_score    <- NA_character_
+    hep_score <- NA_character_
 
     for (sec in hep_sections) {
         if (is.null(sec$Information)) next
@@ -343,14 +378,14 @@ get_tox <- function(pubchem_cid) {
         out
     } else {
         data.frame(
-            pubchem_cid                     = pubchem_cid,
-            reference_number                = NA_character_,
-            dili_dataset                    = NA_character_,
-            dili_severity_grade             = NA_character_,
-            dili_annotation                 = NA_character_,
-            dili_source_url                 = NA_character_,
+            pubchem_cid = pubchem_cid,
+            reference_number = NA_character_,
+            dili_dataset = NA_character_,
+            dili_severity_grade = NA_character_,
+            dili_annotation = NA_character_,
+            dili_source_url = NA_character_,
             hepatotoxicity_likelihood_score = hep_score,
-            stringsAsFactors               = FALSE
+            stringsAsFactors = FALSE
         )
     }
 }
@@ -364,7 +399,7 @@ if (!length(todo)) {
 }
 
 batch_size <- 25L
-batches    <- split(todo, ceiling(seq_along(todo) / batch_size))
+batches <- split(todo, ceiling(seq_along(todo) / batch_size))
 
 for (b in seq_along(batches)) {
     batch <- batches[[b]]
