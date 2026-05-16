@@ -5,8 +5,8 @@ import re
 import os
 
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
-INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_12_2026/union_out.csv"
-OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_12_2026"
+INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_15_2026/union_out.csv"
+OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_15_2026"
 OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_mechanism.csv")
 
 print(f"Connecting to SQLite Database: {DB_PATH}...")
@@ -27,6 +27,8 @@ SELECT
     dm.disease_efficacy,
     dm.molecular_mechanism,
     md.max_phase,
+    md.prodrug,
+    parent_md.prodrug             AS parent_prodrug,
     dm.record_id,
     dm.mec_id,
     dm.site_id,
@@ -181,6 +183,8 @@ ANNOTATIONGX_COL_ORDER = [
     'direct_interaction',
     'disease_efficacy',
     'max_phase',
+    'prodrug',
+    'parent_prodrug',
     'mec_id',
     'mechanism_comment',
     'mechanism_of_action',
