@@ -183,8 +183,11 @@ class Toxicity(Base):
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
     )
+    reference_number: Mapped[int] = mapped_column(Integer)
+    dili_dataset: Mapped[str] = mapped_column(String(50))
     dili_severity_grade: Mapped[int] = mapped_column(Integer)
     dili_annotation: Mapped[str] = mapped_column(Text)
+    dili_source_url: Mapped[str] = mapped_column(String(50))
     hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
 
     compound: Mapped["Compounds"] = relationship(
@@ -245,6 +248,8 @@ class ChemblMechanism(Base):
     site_id: Mapped[str] = mapped_column(Text())
     target_chembl_id: Mapped[str] = mapped_column(String(30))
     target_name: Mapped[str] = mapped_column(Text())
+    prodrug: Mapped[bool] = mapped_column(Boolean)
+    parent_prodrug: Mapped[bool] = mapped_column(Boolean)
     # Fields below are extracted from the variant sequence object
     variant_sequence_accession: Mapped[str] = mapped_column(String(50))
     variant_sequence_isoform: Mapped[int] = mapped_column(Integer)
