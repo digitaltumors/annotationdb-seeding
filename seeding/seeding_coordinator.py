@@ -38,7 +38,7 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 compounds_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/union_out.csv"
+    "seeding/seeding_data/may_15_2026/union_out.csv"
 )
 
 # Remove any duplicate entries based on cids
@@ -53,7 +53,7 @@ if "cid" in compounds_df.columns:
 compounds_df["fda_approval"] = compounds_df["chembl_max_phase"] == 4
 
 synonyms_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/union_synonyms.csv"
+    "seeding/seeding_data/may_15_2026/union_synonyms.csv"
 )
 
 # Remove any duplicate synonym entries based on cid/synonym combos
@@ -68,19 +68,19 @@ if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
     )
 
 compounds_bioassays_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/union_bioassays.csv"
+    "seeding/seeding_data/may_15_2026/union_bioassays.csv"
 )
 
 bioassays_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/union_pubchem_assay_fields.csv"
+    "seeding/seeding_data/may_15_2026/union_pubchem_assay_fields.csv"
 )
 
 toxicity_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/toxicity_output.csv"
+    "seeding/seeding_data/may_15_2026/toxicity_output_new.csv"
 )
 
 chembl_mech_df = pd.read_csv(
-    "seeding/seeding_data/apr_29_2026/chembl_mechanism.csv"
+    "seeding/seeding_data/may_15_2026/chembl_mechanism.csv"
 )
 
 valid_chembls = set(compounds_df["molecule_chembl_id"].dropna().astype(str))
@@ -201,6 +201,34 @@ if len(cb_removed_df) > 0:
     )
 
 compounds_bioassays_df = cb_kept_df
+
+# 4) Filter synonyms rows to only CIDs that exist in compounds_df (FK safety)
+synonyms_df["pubchem_cid"] = pd.to_numeric(synonyms_df["pubchem_cid"], errors="coerce")
+synonyms_df = synonyms_df.dropna(subset=["pubchem_cid"])
+synonyms_df["pubchem_cid"] = synonyms_df["pubchem_cid"].astype(int)
+
+syn_missing_mask = ~synonyms_df["pubchem_cid"].isin(cids_in_compounds)
+syn_removed_df = synonyms_df[syn_missing_mask].copy()
+syn_kept_df = synonyms_df[~syn_missing_mask].copy()
+
+if len(syn_removed_df) > 0:
+    syn_removed_df.to_csv(
+        os.path.join(
+            os.getcwd(),
+            f"seeding/error_logs/removed_synonyms_rows_missing_cid_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        ),
+        index=False,
+    )
+    missing_syn_cids = sorted(syn_removed_df["pubchem_cid"].unique().tolist())
+    pd.DataFrame({"cid": missing_syn_cids}).to_csv(
+        os.path.join(
+            os.getcwd(),
+            f"seeding/error_logs/missing_cids_from_synonyms_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        ),
+        index=False,
+    )
+
+synonyms_df = syn_kept_df
 
 # 1) Deduplicate toxicity rows (PK is pubchem_cid)
 toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid"], keep="first")
