@@ -309,7 +309,7 @@ if (file.exists(allowed_aids_path)) {
 # Load input mapping (input_id -> cid)
 # ---------------------------
 printf("[%s] Loading input: %s", ts(), in_csv)
-inp <- fread(in_csv)
+inp <- fread(in_csv, sep = ",", fill = TRUE)
 
 cn <- names(inp)
 
@@ -354,7 +354,7 @@ inchikey_to_cid <- function(key, max_retries = 6) {
 # Load input mapping (input_id -> cid / inchikey)
 # ---------------------------
 printf("[%s] Loading input: %s", ts(), in_csv)
-inp <- fread(in_csv)
+inp <- fread(in_csv, sep = ",", fill = TRUE)
 
 cn <- names(inp)
 
@@ -443,6 +443,51 @@ if (any(needs_res) && !is.null(inchikey_col)) {
         if (length(key_map) > 0) {
             res_inp[needs_res, cid := vapply(inchikey, function(k) key_map[[k]] %||% NA_character_, character(1))]
         }
+    }
+}
+
+# ---------------------------
+# CID RESOLUTION (by Name via AnnotationGx)
+# ---------------------------
+needs_res <- is.na(res_inp$cid) | !nzchar(trimws(as.character(res_inp$cid))) | res_inp$cid == "0"
+if (any(needs_res)) {
+    names_to_res <- unique(res_inp[needs_res & !is.na(input_id) & nzchar(input_id), input_id])
+    if (length(names_to_res) > 0) {
+        # Random stagger to spread out concurrent pods hitting the PubChem API simultaneously
+        stagger <- runif(1, 0, 15)
+        printf("[%s] Staggering name resolution by %.1fs to avoid API rate-limiting...", ts(), stagger)
+        Sys.sleep(stagger)
+
+        printf("[%s] Resolving %d unique Name(s) to CIDs using AnnotationGx...", ts(), length(names_to_res))
+        
+        tryCatch({
+            name_map_df <- as.data.table(AnnotationGx::mapCompound2CID(names_to_res))
+            
+            # mapCompound2CID returns: name | cids
+            if ("cids" %in% names(name_map_df) && "name" %in% names(name_map_df)) {
+                # Remove rows with no CIDs and deduplicate by taking the first match
+                name_map_df <- name_map_df[!is.na(cids) & nzchar(cids)]
+                name_map_df <- name_map_df[!duplicated(name)]
+                
+                if (nrow(name_map_df) > 0) {
+                    nm_vec <- setNames(as.character(name_map_df$cids), as.character(name_map_df$name))
+                    resolved_mask <- needs_res & (res_inp$input_id %in% names(nm_vec))
+                    
+                    if (any(resolved_mask)) {
+                        res_inp[resolved_mask, cid := nm_vec[input_id]]
+                        printf("[%s] Successfully resolved %d names to CIDs via AnnotationGx.", ts(), length(unique(res_inp[resolved_mask, input_id])))
+                    }
+                } else {
+                    printf("[%s] AnnotationGx returned no valid CIDs for these names.", ts())
+                }
+            } else {
+                printf("[%s] WARNING: AnnotationGx output missing 'name' or 'cids' columns.", ts())
+            }
+        }, error = function(e) {
+            printf("[%s] WARNING: AnnotationGx::mapCompound2CID failed: %s", ts(), e$message)
+        })
+
+
     }
 }
 

@@ -2,8 +2,8 @@
 import pandas as pd
 import numpy as np
 
-file1 = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/output_data/union/mar-27-2026/union_out.csv"
-file2 = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/apr_29_2026/union_out.csv"
+file1 = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/apr_29_2026/union_out.csv"
+file2 = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_15_2026/union_out.csv"
 
 # Columns to audit
 audit_cols = ['molecular_weight', 'smiles', 'xlogp', 'molecule_chembl_id', 'chembl_max_phase', 'drug_like']

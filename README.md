@@ -62,6 +62,19 @@ python merge_outputs.py
 Best for massive lists (100k+ compounds). This orchestrates dozens of Pods in parallel.
 
 ```bash
+# Create cluster on GKE
+
+gcloud container clusters create annotationdb-extraction \
+  --zone northamerica-northeast2-a \
+  --num-nodes 4 \
+  --machine-type e2-standard-2 \
+  --service-account annotationdb-scraping@annotationdb.iam.gserviceaccount.com
+
+
+gcloud container clusters get-credentials annotationdb-extraction --location=northamerica-northeast2-a
+```
+
+```bash
 cd data_extraction/drugs/pubchem/kubernetes
 
 # 1. Generate the batches and the K8s Job YAML
@@ -71,8 +84,7 @@ python coordinator.py \
   --max-batches 10
 
 # 2. Build and Push the Docker image (required if you changed the code/dependencies)
-docker build -t bhklabmattbocc/annotationdb-r:latest .
-docker push bhklabmattbocc/annotationdb-r:latest
+docker buildx build --platform linux/amd64 -t bhklabmattbocc/annotationdb-r:v9 --push .
 
 # 3. Deploy the Job to GKE
 kubectl apply -f job.yaml
