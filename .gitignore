@@ -9,3 +9,6 @@ __pycache__
 .DS_Store
 backup_data
 error_logs
+
+/json_to_csv_scripts
+/data_extraction/drugs/pubchem/substance/output/

@@ -221,6 +221,71 @@ class Toxicity(Base):
 
 
 # https://www.ebi.ac.uk/chembl/api/data/mechanism/schema?format=json
+class Substances(Base):
+    __tablename__ = "substances"
+
+    sid: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    mapped_name: Mapped[str] = mapped_column(String(200))
+    molecule_chembl_id: Mapped[str] = mapped_column(String(200), unique=True, nullable=True)
+    chembl_max_phase: Mapped[int] = mapped_column(Integer)
+
+    synonyms: Mapped[list["SubstanceSynonyms"]] = relationship(
+        back_populates="substances", cascade="all, delete-orphan"
+    )
+
+    mechanisms: Mapped[list["ChemblMechanism"]] = relationship(
+        "ChemblMechanism",
+        primaryjoin="Substances.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
+        back_populates="substances",
+        lazy="noload",
+    )
+
+    toxicity: Mapped["SubstanceToxicity"] = relationship(
+        "SubstanceToxicity",
+        back_populates="substances",
+        lazy="noload",
+    )
+
+
+class SubstanceSynonyms(Base):
+    __tablename__ = "substance_synonyms"
+
+    synonym: Mapped[str] = mapped_column(String(700), primary_key=True)
+    sid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("substances.sid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # source: Mapped[str] = mapped_column(String(50))
+    version: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    ### ORM layer (fields below don't show up in table but are used in queries later on for convenience)
+    substance: Mapped["Substances"] = relationship(back_populates="substance_synonyms")
+
+class SubstanceToxicity(Base):
+    __tablename__ = "substance_toxicity"
+
+    sid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("substances.sid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    reference_number: Mapped[int] = mapped_column(Integer)
+    dili_dataset: Mapped[str] = mapped_column(String(50))
+    dili_severity_grade: Mapped[int] = mapped_column(Integer)
+    dili_annotation: Mapped[str] = mapped_column(Text)
+    dili_source_url: Mapped[str] = mapped_column(String(50))
+    hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        back_populates="substance_toxicity",
+    )
+
+
 class ChemblMechanism(Base):
     __tablename__ = "chembl_mechanism"
 
