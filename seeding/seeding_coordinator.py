@@ -13,6 +13,9 @@ from create_tables import (
     BioAssays,
     Toxicity,
     ChemblMechanism,
+    Substances,
+    SubstanceSynonyms,
+    SubstanceToxicity,
     CellLines,
     CellLineSynonyms,
     CellLineDisease,
@@ -38,7 +41,7 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 compounds_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/union_out.csv"
+    "seeding/seeding_data/may_20_2026/union_out.csv"
 )
 
 # Remove any duplicate entries based on cids
@@ -53,7 +56,7 @@ if "cid" in compounds_df.columns:
 compounds_df["fda_approval"] = compounds_df["chembl_max_phase"] == 4
 
 synonyms_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/union_synonyms.csv"
+    "seeding/seeding_data/may_20_2026/union_synonyms.csv"
 )
 
 # Remove any duplicate synonym entries based on cid/synonym combos
@@ -68,22 +71,43 @@ if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
     )
 
 compounds_bioassays_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/union_bioassays.csv"
+    "seeding/seeding_data/may_20_2026/union_bioassays.csv"
 )
 
 bioassays_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/union_pubchem_assay_fields.csv"
+    "seeding/seeding_data/may_20_2026/union_pubchem_assay_fields.csv"
 )
 
 toxicity_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/toxicity_output_new.csv"
+    "seeding/seeding_data/may_20_2026/toxicity_output_new.csv"
 )
 
 chembl_mech_df = pd.read_csv(
-    "seeding/seeding_data/may_15_2026/chembl_mechanism.csv"
+    "seeding/seeding_data/may_20_2026/chembl_mechanism.csv"
 )
 
-valid_chembls = set(compounds_df["molecule_chembl_id"].dropna().astype(str))
+substances_df = pd.read_csv(
+    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_out.csv"
+)
+
+substance_synonyms_df = pd.read_csv(
+    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_synonyms.csv"
+)
+
+substance_toxicity_df = pd.read_csv(
+    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_toxicity.csv"
+)
+
+substance_mechanism_df = pd.read_csv(
+    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_chembl_mechanism.csv"
+)
+
+chembl_mech_df = pd.concat([chembl_mech_df, substance_mechanism_df], ignore_index=True)
+chembl_mech_df = chembl_mech_df.drop_duplicates()
+valid_chembls = set(compounds_df["molecule_chembl_id"].dropna().astype(str)).union(
+    set(substances_df["molecule_chembl_id"].dropna().astype(str))
+)
+
 before = len(chembl_mech_df)
 chembl_mech_df = chembl_mech_df[chembl_mech_df["source"] == "drug_mechanism"]  # Filter verified mechanisms only
 chembl_mech_df = chembl_mech_df[
@@ -114,6 +138,9 @@ synonyms_df = align_to_model(synonyms_df, CompoundSynonyms)
 compounds_bioassays_df = align_to_model(compounds_bioassays_df, CompoundBioAssays)
 bioassays_df = align_to_model(bioassays_df, BioAssays)
 chembl_mech_df = align_to_model(chembl_mech_df, ChemblMechanism)
+substances_df = align_to_model(substances_df, Substances)
+substance_synonyms_df = align_to_model(substance_synonyms_df, SubstanceSynonyms)
+substance_toxicity_df = align_to_model(substance_toxicity_df, SubstanceToxicity)
 cell_lines_df = align_to_model(cell_lines_df, CellLines)
 cell_lines_synonyms_df = align_to_model(cell_lines_synonyms_df, CellLineSynonyms)
 cell_lines_disease_df = align_to_model(cell_lines_disease_df, CellLineDisease)
@@ -230,8 +257,9 @@ if len(syn_removed_df) > 0:
 
 synonyms_df = syn_kept_df
 
-# 1) Deduplicate toxicity rows (PK is pubchem_cid)
+# 1) Deduplicate toxicity rows
 toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid"], keep="first")
+substance_toxicity_df = substance_toxicity_df.drop_duplicates(subset=["sid"], keep="first")
 
 # 2) Filter toxicity rows to only CIDs that exist in compounds_df
 cids_in_compounds = set(compounds_df["cid"].dropna().astype(int))
@@ -294,4 +322,13 @@ cell_lines_disease_df.to_sql(
 )
 oncotree_df.to_sql(
     name=OncoTree.__tablename__, con=engine, if_exists="append", index=False
+)
+substances_df.to_sql(
+    name=Substances.__tablename__, con=engine, if_exists="append", index=False
+)
+substance_synonyms_df.to_sql(
+    name=SubstanceSynonyms.__tablename__, con=engine, if_exists="append", index=False
+)
+substance_toxicity_df.to_sql(
+    name=SubstanceToxicity.__tablename__, con=engine, if_exists="append", index=False
 )
