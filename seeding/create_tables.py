@@ -291,7 +291,6 @@ class ChemblMechanism(Base):
 
     molecule_chembl_id: Mapped[str] = mapped_column(
         String(200),
-        ForeignKey("pubchem_compounds.molecule_chembl_id", ondelete="CASCADE"),
         primary_key=True,
     )
     parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200))
@@ -332,6 +331,80 @@ class ChemblMechanism(Base):
         primaryjoin="foreign(ChemblMechanism.molecule_chembl_id) == Compounds.molecule_chembl_id",
         back_populates="mechanisms",
     )
+
+class AntibodyDrugConjugates(Base):
+    __tablename__ = "antibody_drug_conjugates"
+
+    adc_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    adc_drug_name: Mapped[str] = mapped_column(String(255))
+    adc_name: Mapped[str] = mapped_column(String(255))
+    adc_brand_name: Mapped[str] = mapped_column(String(255))
+    adc_phase: Mapped[str] = mapped_column(String(50))
+    adc_drug_status: Mapped[str] = mapped_column(String(255))
+    adc_detail_url: Mapped[str] = mapped_column(String(255))
+    adc_synonyms: Mapped[str] = mapped_column(Text())
+    adc_organization: Mapped[str] = mapped_column(Text())
+    adc_drug_to_antibody_ratio: Mapped[str] = mapped_column(String(50))
+    adc_structure: Mapped[str] = mapped_column(Text())
+    adc_therapeutic_target: Mapped[str] = mapped_column(String(255))
+    adc_conjugate_type: Mapped[str] = mapped_column(String(255))
+    adc_combination_type: Mapped[str] = mapped_column(String(255))
+    adc_special_approvals: Mapped[str] = mapped_column(Text())
+    adc_pubchem_sid: Mapped[int] = mapped_column(Integer, nullable=True)
+    adc_drugbank_id: Mapped[str] = mapped_column(String(50))
+
+    antibody_id: Mapped[str] = mapped_column(String(50))
+    antibody_name: Mapped[str] = mapped_column(String(255))
+    antibody_organization: Mapped[str] = mapped_column(Text())
+    antibody_indication: Mapped[str] = mapped_column(Text())
+    antibody_synonyms: Mapped[str] = mapped_column(Text())
+    antibody_type: Mapped[str] = mapped_column(String(100))
+    antibody_subtype: Mapped[str] = mapped_column(String(100))
+    antibody_antigen_name: Mapped[str] = mapped_column(String(255))
+    antibody_chembl_id: Mapped[str] = mapped_column(String(50))
+    antibody_heavy_chain_sequence: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_variable_domain: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_constant_domain_1: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_constant_domain_2: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_constant_domain_3: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_hinge_region: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_cdr_1: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_cdr_2: Mapped[str] = mapped_column(Text())
+    antibody_heavy_chain_cdr_3: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_sequence: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_variable_domain: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_constant_domain: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_cdr_1: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_cdr_2: Mapped[str] = mapped_column(Text())
+    antibody_light_chain_cdr_3: Mapped[str] = mapped_column(Text())
+
+    payload_id: Mapped[str] = mapped_column(String(50))
+    payload_name: Mapped[str] = mapped_column(String(255))
+    payload_synonyms: Mapped[str] = mapped_column(Text())
+    payload_targets: Mapped[str] = mapped_column(Text())
+    payload_structure: Mapped[str] = mapped_column(Text())
+    payload_formula: Mapped[str] = mapped_column(String(255))
+    payload_isosmiles: Mapped[str] = mapped_column(Text())
+    payload_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
+    payload_inchi: Mapped[str] = mapped_column(Text())
+    payload_inchikey: Mapped[str] = mapped_column(String(255))
+    payload_iupac_name: Mapped[str] = mapped_column(Text())
+    payload_pharmaceutical_properties: Mapped[str] = mapped_column(Text())
+
+    linker_id: Mapped[str] = mapped_column(String(50))
+    linker_name: Mapped[str] = mapped_column(String(255))
+    linker_type: Mapped[str] = mapped_column(String(255))
+    linker_antibody_linker_relation: Mapped[str] = mapped_column(String(255))
+    linker_structure: Mapped[str] = mapped_column(Text())
+    linker_formula: Mapped[str] = mapped_column(String(255))
+    linker_isosmiles: Mapped[str] = mapped_column(Text())
+    linker_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
+    linker_inchi: Mapped[str] = mapped_column(Text())
+    linker_inchikey: Mapped[str] = mapped_column(String(255))
+    linker_iupac_name: Mapped[str] = mapped_column(Text())
+    linker_pharmaceutical_properties: Mapped[str] = mapped_column(Text())
+
+
 
 
 # https://www.ebi.ac.uk/chembl/api/data/molecule/schema?format=json
