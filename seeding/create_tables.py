@@ -231,19 +231,19 @@ class Substances(Base):
     chembl_max_phase: Mapped[int] = mapped_column(Integer)
 
     synonyms: Mapped[list["SubstanceSynonyms"]] = relationship(
-        back_populates="substances", cascade="all, delete-orphan"
+        back_populates="substance", cascade="all, delete-orphan"
     )
 
     mechanisms: Mapped[list["ChemblMechanism"]] = relationship(
         "ChemblMechanism",
         primaryjoin="Substances.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
-        back_populates="substances",
+        back_populates="substance",
         lazy="noload",
     )
 
     toxicity: Mapped["SubstanceToxicity"] = relationship(
         "SubstanceToxicity",
-        back_populates="substances",
+        back_populates="substance",
         lazy="noload",
     )
 
@@ -263,7 +263,7 @@ class SubstanceSynonyms(Base):
     )
 
     ### ORM layer (fields below don't show up in table but are used in queries later on for convenience)
-    substance: Mapped["Substances"] = relationship(back_populates="substance_synonyms")
+    substance: Mapped["Substances"] = relationship(back_populates="synonyms")
 
 class SubstanceToxicity(Base):
     __tablename__ = "substance_toxicity"
@@ -282,7 +282,7 @@ class SubstanceToxicity(Base):
 
     substance: Mapped["Substances"] = relationship(
         "Substances",
-        back_populates="substance_toxicity",
+        back_populates="toxicity",
     )
 
 
@@ -329,6 +329,12 @@ class ChemblMechanism(Base):
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
         primaryjoin="foreign(ChemblMechanism.molecule_chembl_id) == Compounds.molecule_chembl_id",
+        back_populates="mechanisms",
+    )
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        primaryjoin="foreign(ChemblMechanism.molecule_chembl_id) == Substances.molecule_chembl_id",
         back_populates="mechanisms",
     )
 
