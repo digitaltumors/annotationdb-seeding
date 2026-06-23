@@ -101,6 +101,17 @@ class Compounds(Base):
         lazy="noload",
     )
 
+    diril_toxicity: Mapped["DIRIL_Toxicity"] = relationship(
+        "DIRIL_Toxicity",
+        back_populates="compound",
+        lazy="noload",
+    )
+
+    dict_rank_toxicity: Mapped["DICT_Rank_Toxicity"] = relationship(
+        "DICT_Rank_Toxicity",
+        back_populates="compound",
+        lazy="noload",
+    )
 
 class CompoundSynonyms(Base):
     __tablename__ = "compound_synonyms"
@@ -195,6 +206,34 @@ class Toxicity(Base):
         back_populates="toxicity",
     )
 
+class DIRIL_Toxicity(Base):
+    __tablename__ = "diril_toxicity"
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    description: Mapped[str] = mapped_column(String(2000)),
+    product_name: Mapped[str] = mapped_column(String(100)),
+    product_date: Mapped[str] = mapped_column(String(100)),
+    product_country: Mapped[str] = mapped_column(String(100)),
+    label_gong: Mapped[str] = mapped_column(String(50)),
+    label_shi: Mapped[str] = mapped_column(String(50)),
+    toxicity: Mapped[str] = mapped_column(String(50)),
+
+class DICT_Rank_Toxicity(Base):
+    __tablename__ = "dict_rank_toxicity"
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    active_ingredients: Mapped[str] = mapped_column(String(100)),
+    cardiotoxicity: Mapped[str] = mapped_column(String(50)),
+    label_section: Mapped[str] = mapped_column(String(50)),
+    dic_severity_level: Mapped[str] = mapped_column(String(50)),
+    dict_concern: Mapped[str] = mapped_column(String(50)),
+    keywords: Mapped[str] = mapped_column(String(100)),
 
 # https://www.ebi.ac.uk/chembl/api/data/drug/schema?format=json
 # class ChemblDrugData(Base):
@@ -358,6 +397,15 @@ class AntibodyDrugConjugates(Base):
     adc_special_approvals: Mapped[str] = mapped_column(Text())
     adc_pubchem_sid: Mapped[int] = mapped_column(Integer, nullable=True)
     adc_drugbank_id: Mapped[str] = mapped_column(String(50))
+    adc_chembl_id: Mapped[str] = mapped_column(String(50))
+    adc_absorption: Mapped[str] = mapped_column(Text())
+    adc_distribution: Mapped[str] = mapped_column(Text())
+    adc_metabolism: Mapped[str] = mapped_column(Text())
+    adc_elimination: Mapped[str] = mapped_column(Text())
+    adc_toxicity: Mapped[str] = mapped_column(Text())
+    adc_drugmap_id: Mapped[str] = mapped_column(String(50))
+    adc_ttd_id: Mapped[str] = mapped_column(String(50))
+    adc_dresis_id: Mapped[str] = mapped_column(String(50))
 
     antibody_id: Mapped[str] = mapped_column(String(50))
     antibody_name: Mapped[str] = mapped_column(String(255))
