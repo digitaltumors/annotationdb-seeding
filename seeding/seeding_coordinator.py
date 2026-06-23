@@ -20,6 +20,7 @@ from create_tables import (
     CellLineSynonyms,
     CellLineDisease,
     OncoTree,
+    AntibodyDrugConjugates,
 )
 
 load_dotenv(override=True)
@@ -43,6 +44,10 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 compounds_df = pd.read_csv(
     "seeding/seeding_data/may_20_2026/union_out.csv"
 )
+
+# Load ADCs
+adcs_df = pd.read_json("substance_to_cid/adcdb_results.json")
+adcs_df = align_to_model(adcs_df, AntibodyDrugConjugates)
 
 # Remove any duplicate entries based on cids
 if "cid" in compounds_df.columns:
@@ -87,19 +92,19 @@ chembl_mech_df = pd.read_csv(
 )
 
 substances_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_out.csv"
+    "data_extraction/drugs/pubchem/substance/output/combined/substance_out.csv"
 )
 
 substance_synonyms_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_synonyms.csv"
+    "data_extraction/drugs/pubchem/substance/output/combined/substance_synonyms.csv"
 )
 
 substance_toxicity_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_toxicity.csv"
+    "data_extraction/drugs/pubchem/substance/output/combined/substance_toxicity.csv"
 )
 
 substance_mechanism_df = pd.read_csv(
-    "data_extraction/drugs/pubchem/substance/output/akshat_antibodies/substance_chembl_mechanism.csv"
+    "data_extraction/drugs/pubchem/substance/output/combined/chembl_mechanism.csv"
 )
 
 chembl_mech_df = pd.concat([chembl_mech_df, substance_mechanism_df], ignore_index=True)
@@ -322,6 +327,9 @@ cell_lines_disease_df.to_sql(
 )
 oncotree_df.to_sql(
     name=OncoTree.__tablename__, con=engine, if_exists="append", index=False
+)
+adcs_df.to_sql(
+    name=AntibodyDrugConjugates.__tablename__, con=engine, if_exists="append", index=False
 )
 substances_df.to_sql(
     name=Substances.__tablename__, con=engine, if_exists="append", index=False
