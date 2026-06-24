@@ -14,8 +14,9 @@ class Compounds(Base):
     title: Mapped[str] = mapped_column(Text())
     mapped_name: Mapped[str] = mapped_column(Text())
     molecule_chembl_id: Mapped[str] = mapped_column(
-        String(200), unique=True, nullable=True
+        String(200), nullable=True
     )
+    molecule_chembl_id_from_synonyms: Mapped[bool] = mapped_column(Boolean, default=False)
     molecular_formula: Mapped[str] = mapped_column(String(300))
     molecular_weight: Mapped[str] = mapped_column(String(50))
     smiles: Mapped[str] = mapped_column(String(2000))
@@ -235,6 +236,7 @@ class DICT_Rank_Toxicity(Base):
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
     )
+    trade_name: Mapped[str] = mapped_column(String(200))
     active_ingredients: Mapped[str] = mapped_column(String(100))
     cardiotoxicity: Mapped[str] = mapped_column(String(50))
     label_section: Mapped[str] = mapped_column(String(50))
