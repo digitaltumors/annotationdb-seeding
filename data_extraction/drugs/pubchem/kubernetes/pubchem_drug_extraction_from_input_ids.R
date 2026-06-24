@@ -459,35 +459,36 @@ if (any(needs_res)) {
         Sys.sleep(stagger)
 
         printf("[%s] Resolving %d unique Name(s) to CIDs using AnnotationGx...", ts(), length(names_to_res))
-        
-        tryCatch({
-            name_map_df <- as.data.table(AnnotationGx::mapCompound2CID(names_to_res))
-            
-            # mapCompound2CID returns: name | cids
-            if ("cids" %in% names(name_map_df) && "name" %in% names(name_map_df)) {
-                # Remove rows with no CIDs and deduplicate by taking the first match
-                name_map_df <- name_map_df[!is.na(cids) & nzchar(cids)]
-                name_map_df <- name_map_df[!duplicated(name)]
-                
-                if (nrow(name_map_df) > 0) {
-                    nm_vec <- setNames(as.character(name_map_df$cids), as.character(name_map_df$name))
-                    resolved_mask <- needs_res & (res_inp$input_id %in% names(nm_vec))
-                    
-                    if (any(resolved_mask)) {
-                        res_inp[resolved_mask, cid := nm_vec[input_id]]
-                        printf("[%s] Successfully resolved %d names to CIDs via AnnotationGx.", ts(), length(unique(res_inp[resolved_mask, input_id])))
+
+        tryCatch(
+            {
+                name_map_df <- as.data.table(AnnotationGx::mapCompound2CID(names_to_res))
+
+                # mapCompound2CID returns: name | cids
+                if ("cids" %in% names(name_map_df) && "name" %in% names(name_map_df)) {
+                    # Remove rows with no CIDs and deduplicate by taking the first match
+                    name_map_df <- name_map_df[!is.na(cids) & nzchar(cids)]
+                    name_map_df <- name_map_df[!duplicated(name)]
+
+                    if (nrow(name_map_df) > 0) {
+                        nm_vec <- setNames(as.character(name_map_df$cids), as.character(name_map_df$name))
+                        resolved_mask <- needs_res & (res_inp$input_id %in% names(nm_vec))
+
+                        if (any(resolved_mask)) {
+                            res_inp[resolved_mask, cid := nm_vec[input_id]]
+                            printf("[%s] Successfully resolved %d names to CIDs via AnnotationGx.", ts(), length(unique(res_inp[resolved_mask, input_id])))
+                        }
+                    } else {
+                        printf("[%s] AnnotationGx returned no valid CIDs for these names.", ts())
                     }
                 } else {
-                    printf("[%s] AnnotationGx returned no valid CIDs for these names.", ts())
+                    printf("[%s] WARNING: AnnotationGx output missing 'name' or 'cids' columns.", ts())
                 }
-            } else {
-                printf("[%s] WARNING: AnnotationGx output missing 'name' or 'cids' columns.", ts())
+            },
+            error = function(e) {
+                printf("[%s] WARNING: AnnotationGx::mapCompound2CID failed: %s", ts(), e$message)
             }
-        }, error = function(e) {
-            printf("[%s] WARNING: AnnotationGx::mapCompound2CID failed: %s", ts(), e$message)
-        })
-
-
+        )
     }
 }
 
@@ -791,7 +792,7 @@ fetch_chembl_phase <- function(chembl_id) {
 
 .chembl_consecutive_api_blocks <- 0L
 
-annotate_chembl_id_one <- function(cid) {
+annotate_chembl_id_one <- function(cid, max_retries = 3, base_wait = 1.0) {
     if (.chembl_consecutive_api_blocks >= 5L) {
         return(NA_character_)
     }
@@ -801,45 +802,47 @@ annotate_chembl_id_one <- function(cid) {
         return(NA_character_)
     }
 
-    api_blocked <- FALSE
-    out <- withCallingHandlers(
-        tryCatch(
-            AnnotationGx::annotatePubchemCompound(cid_num, "ChEMBL ID"),
-            error = function(e) {
-                if (grepl("httr2_http_|timeout|503|502|504|429", e$message, ignore.case = TRUE)) {
+    for (i in seq_len(max_retries)) {
+        api_blocked <- FALSE
+        out <- withCallingHandlers(
+            tryCatch(
+                AnnotationGx::annotatePubchemCompound(cid_num, "ChEMBL ID"),
+                error = function(e) {
+                    if (grepl("httr2_http_|timeout|503|502|504|429", e$message, ignore.case = TRUE)) {
+                        api_blocked <<- TRUE
+                    }
+                    NULL
+                }
+            ),
+            warning = function(w) {
+                if (grepl("httr2_http_|timeout|503|502|504|429", w$message, ignore.case = TRUE)) {
                     api_blocked <<- TRUE
                 }
-                NULL
             }
-        ),
-        warning = function(w) {
-            if (grepl("httr2_http_|timeout|503|502|504|429", w$message, ignore.case = TRUE)) {
-                api_blocked <<- TRUE
-            }
-        }
-    )
+        )
 
-    if (api_blocked) {
+        if (!api_blocked) {
+            .chembl_consecutive_api_blocks <<- 0L
+            if (is.null(out)) return(NA_character_)
+            x <- as.character(out)
+            x <- unique(trimws(x))
+            x <- x[!is.na(x) & nzchar(x)]
+            if (!length(x)) return(NA_character_)
+            return(paste(x, collapse = ";"))
+        }
+
         .chembl_consecutive_api_blocks <<- .chembl_consecutive_api_blocks + 1L
-        if (.chembl_consecutive_api_blocks == 5L) {
+        if (.chembl_consecutive_api_blocks >= 5L) {
             printf("[%s] CRITICAL: 5 consecutive PubChem/ChEMBL API blocks detected! Aborting remaining ChEMBL queries to prevent script hang.", ts())
+            return(NA_character_)
         }
-        return(NA_character_)
-    } else {
-        .chembl_consecutive_api_blocks <<- 0L
+
+        if (i < max_retries) {
+            Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.5))
+        }
     }
 
-    if (is.null(out)) {
-        return(NA_character_)
-    }
-
-    x <- as.character(out)
-    x <- unique(trimws(x))
-    x <- x[!is.na(x) & nzchar(x)]
-    if (!length(x)) {
-        return(NA_character_)
-    }
-    paste(x, collapse = ";")
+    return(NA_character_)
 }
 
 if (!is.null(props_dt_all) && NROW(props_dt_all) > 0) {
