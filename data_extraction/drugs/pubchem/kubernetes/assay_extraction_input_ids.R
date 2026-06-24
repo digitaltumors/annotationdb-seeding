@@ -91,7 +91,7 @@ log_error <- function(aid, detail) {
 # ---------------------------
 # Load batch input_ids
 # ---------------------------
-bdt <- fread(batch_ids_path, fill = TRUE)
+bdt <- read.csv(batch_ids_path, stringsAsFactors = FALSE, check.names = FALSE)
 # The coordinator now passes full rows. We need to identify the ID column.
 cn <- names(bdt)
 input_id_col <- NULL

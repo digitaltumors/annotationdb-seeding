@@ -177,7 +177,7 @@ get_batch_cids <- function(props_dt, batch_input_ids_csv) {
         return(out[nzchar(out) & out != "0"])
     }
     if (!file.exists(batch_input_ids_csv)) stop("batch_input_ids file not found: ", batch_input_ids_csv)
-    b <- fread(batch_input_ids_csv, fill = TRUE)
+    b <- read.csv(batch_input_ids_csv, stringsAsFactors = FALSE, check.names = FALSE)
     cn <- names(b)
     id_col <- NULL
     for (cand in c("input_id", "inputId", "substance", "name", "drug", "synonym")) {
