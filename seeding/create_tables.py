@@ -208,32 +208,44 @@ class Toxicity(Base):
 
 class DIRIL_Toxicity(Base):
     __tablename__ = "diril_toxicity"
+
     pubchem_cid: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
-    ),
-    description: Mapped[str] = mapped_column(String(2000)),
-    product_name: Mapped[str] = mapped_column(String(100)),
-    product_date: Mapped[str] = mapped_column(String(100)),
-    product_country: Mapped[str] = mapped_column(String(100)),
-    label_gong: Mapped[str] = mapped_column(String(50)),
-    label_shi: Mapped[str] = mapped_column(String(50)),
-    toxicity: Mapped[str] = mapped_column(String(50)),
+    )
+    description: Mapped[str] = mapped_column(String(2000))
+    product_name: Mapped[str] = mapped_column(String(100))
+    product_date: Mapped[str] = mapped_column(String(100))
+    product_country: Mapped[str] = mapped_column(String(100))
+    label_gong: Mapped[str] = mapped_column(String(50))
+    label_shi: Mapped[str] = mapped_column(String(50))
+    toxicity: Mapped[str] = mapped_column(String(50))
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="diril_toxicity",
+    )
 
 class DICT_Rank_Toxicity(Base):
     __tablename__ = "dict_rank_toxicity"
+
     pubchem_cid: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
-    ),
-    active_ingredients: Mapped[str] = mapped_column(String(100)),
-    cardiotoxicity: Mapped[str] = mapped_column(String(50)),
-    label_section: Mapped[str] = mapped_column(String(50)),
-    dic_severity_level: Mapped[str] = mapped_column(String(50)),
-    dict_concern: Mapped[str] = mapped_column(String(50)),
-    keywords: Mapped[str] = mapped_column(String(100)),
+    )
+    active_ingredients: Mapped[str] = mapped_column(String(100))
+    cardiotoxicity: Mapped[str] = mapped_column(String(50))
+    label_section: Mapped[str] = mapped_column(String(50))
+    dic_severity_level: Mapped[str] = mapped_column(String(50))
+    dict_concern: Mapped[str] = mapped_column(String(50))
+    keywords: Mapped[str] = mapped_column(String(100))
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="dict_rank_toxicity",
+    )
 
 # https://www.ebi.ac.uk/chembl/api/data/drug/schema?format=json
 # class ChemblDrugData(Base):
