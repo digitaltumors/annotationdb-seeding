@@ -39,7 +39,8 @@ MERGE_SPECS = [
     },
     {
         "filename": "toxicity_output.csv",
-        "dedup_key": "pubchem_cid",
+        "target_filename": "toxicity_output_new.csv",
+        "dedup_key": ["pubchem_cid", "tox_dataset"],
     },
     {
         "filename": "union_pubchem_assay_fields.csv",
@@ -93,16 +94,17 @@ def merge_mapped_names(existing: str, new: str) -> str:
 def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
     """Merge a single output file across all batches + existing output."""
     filename = spec["filename"]
+    target_filename = spec.get("target_filename", filename)
     dedup_key = spec["dedup_key"]
     merge_field = spec.get("merge_field")
 
-    print(f"\n--- Merging {filename} ---")
+    print(f"\n--- Merging {filename} into {target_filename} ---")
 
     # Load existing output first
     all_rows: list[dict] = []
     fieldnames: list[str] = []
 
-    existing_text = gsutil_cat(f"{OUTPUT_FINAL}/{filename}")
+    existing_text = gsutil_cat(f"{OUTPUT_FINAL}/{target_filename}")
     if existing_text:
         reader = csv.DictReader(io.StringIO(existing_text))
         fieldnames = list(reader.fieldnames or [])
@@ -140,10 +142,16 @@ def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
         return
 
     # Deduplicate
+    def clean_key(val):
+        v = val.strip()
+        if v.endswith(".0"):
+            v = v[:-2]
+        return v
+
     if isinstance(dedup_key, list):
-        key_fn = lambda row: tuple(row.get(k, "").strip() for k in dedup_key)
+        key_fn = lambda row: tuple(clean_key(row.get(k, "")) for k in dedup_key)
     else:
-        key_fn = lambda row: row.get(dedup_key, "").strip()
+        key_fn = lambda row: clean_key(row.get(dedup_key, ""))
 
     seen: dict = {}  # key -> row index
     deduped: list[dict] = []
@@ -164,7 +172,7 @@ def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
     print(f"  After dedup: {len(deduped)} rows")
 
     if dry_run:
-        print(f"  [dry-run] Would upload {len(deduped)} rows to {OUTPUT_FINAL}/{filename}")
+        print(f"  [dry-run] Would upload {len(deduped)} rows to {OUTPUT_FINAL}/{target_filename}")
         return
 
     # Write to temp file and upload
@@ -174,9 +182,9 @@ def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
         writer.writerows(deduped)
         tmp_path = f.name
 
-    gsutil_cp(tmp_path, f"{OUTPUT_FINAL}/{filename}")
+    gsutil_cp(tmp_path, f"{OUTPUT_FINAL}/{target_filename}")
     os.unlink(tmp_path)
-    print(f"  Uploaded to {OUTPUT_FINAL}/{filename}")
+    print(f"  Uploaded to {OUTPUT_FINAL}/{target_filename}")
 
 
 def main():
