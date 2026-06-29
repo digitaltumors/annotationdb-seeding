@@ -12,6 +12,8 @@ from create_tables import (
     CompoundBioAssays,
     BioAssays,
     Toxicity,
+    DIRIL_Toxicity,
+    DICT_Rank_Toxicity,
     ChemblMechanism,
     Substances,
     SubstanceSynonyms,
@@ -42,8 +44,27 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 compounds_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/union_out.csv"
+    "seeding/seeding_data/jun_29_2026/union_out.csv"
 )
+
+# Build input_id -> CID lookup from union_out.csv's mapped_name column.
+# Used to resolve dictrank_dataset_508.csv input_id values to pubchem_cid.
+if {"cid", "mapped_name"}.issubset(compounds_df.columns):
+    input_id_to_cid = compounds_df[["cid", "mapped_name"]].dropna().copy()
+    input_id_to_cid["input_id"] = input_id_to_cid["mapped_name"].str.split(";")
+    input_id_to_cid = input_id_to_cid.explode("input_id")
+    input_id_to_cid["input_id"] = input_id_to_cid["input_id"].str.strip()
+    input_id_to_cid = input_id_to_cid[input_id_to_cid["input_id"] != ""]
+    input_id_to_cid = input_id_to_cid.rename(columns={"cid": "pubchem_cid"})[["input_id", "pubchem_cid"]]
+    
+    input_id_to_cid["pubchem_cid"] = pd.to_numeric(input_id_to_cid["pubchem_cid"], errors="coerce")
+    input_id_to_cid = input_id_to_cid.dropna(subset=["pubchem_cid"])
+    input_id_to_cid["pubchem_cid"] = input_id_to_cid["pubchem_cid"].astype(int)
+    input_id_to_cid = input_id_to_cid.drop_duplicates(subset=["input_id"])
+else:
+    print("[WARNING] union_out.csv missing mapped_name or cid; dictrank CID resolution will be empty.")
+    input_id_to_cid = pd.DataFrame(columns=["input_id", "pubchem_cid"])
+
 
 # Load ADCs
 adcs_df = pd.read_json("substance_to_cid/adcdb_results.json")
@@ -61,7 +82,7 @@ if "cid" in compounds_df.columns:
 compounds_df["fda_approval"] = compounds_df["chembl_max_phase"] == 4
 
 synonyms_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/union_synonyms.csv"
+    "seeding/seeding_data/jun_29_2026/union_synonyms.csv"
 )
 
 # Remove any duplicate synonym entries based on cid/synonym combos
@@ -76,19 +97,54 @@ if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
     )
 
 compounds_bioassays_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/union_bioassays.csv"
+    "seeding/seeding_data/jun_29_2026/union_bioassays.csv"
 )
 
 bioassays_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/union_pubchem_assay_fields.csv"
+    "seeding/seeding_data/jun_29_2026/union_pubchem_assay_fields.csv"
 )
 
 toxicity_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/toxicity_output_new.csv"
+    "seeding/seeding_data/jun_29_2026/toxicity_output_new.csv"
+)
+
+# ----- DIRIL (diril_dataset_508) -----
+diril_df = (
+    pd.read_csv("seeding/seeding_data/jun_29_2026/diril_dataset_508.csv")
+    .rename(columns={"cid": "pubchem_cid", "My Findings  (Toxicity)": "toxicity"})
+    .dropna(subset=["pubchem_cid"])
+    .drop_duplicates(subset=["pubchem_cid"])
+)
+
+# ----- DICT_Rank (dictrank_dataset_508) -----
+dict_rank_df = pd.read_csv("seeding/seeding_data/jun_29_2026/dictrank_dataset_508.csv")
+dict_rank_df = dict_rank_df.rename(columns=lambda x: x.strip())
+
+label_section_map = {
+    "bw": "boxed warning",
+    "wp": "warnings and precautions",
+    "ar": "adverse reactions",
+    "sp": "special conditions",
+    "no": "no cardiotoxicity info",
+    "overdosage": "cardiotoxicity in overdosage context",
+    "withdraw": "withdrawn from market",
+    "clinical pharmacology": "clinical pharmacology"
+}
+
+if "label_section" in dict_rank_df.columns:
+    dict_rank_df["label_section"] = dict_rank_df["label_section"].apply(
+        lambda x: label_section_map.get(str(x).strip().lower(), x) if pd.notna(x) else x
+    )
+
+dict_rank_df = (
+    dict_rank_df
+    .merge(input_id_to_cid, on="input_id", how="inner")
+    .dropna(subset=["pubchem_cid"])
+    .drop_duplicates(subset=["pubchem_cid"])
 )
 
 chembl_mech_df = pd.read_csv(
-    "seeding/seeding_data/may_20_2026/chembl_mechanism.csv"
+    "seeding/seeding_data/jun_29_2026/chembl_mechanism.csv"
 )
 
 substances_df = pd.read_csv(
@@ -150,6 +206,8 @@ cell_lines_df = align_to_model(cell_lines_df, CellLines)
 cell_lines_synonyms_df = align_to_model(cell_lines_synonyms_df, CellLineSynonyms)
 cell_lines_disease_df = align_to_model(cell_lines_disease_df, CellLineDisease)
 oncotree_df = align_to_model(oncotree_df, OncoTree)
+diril_df = align_to_model(diril_df, DIRIL_Toxicity)
+dict_rank_df = align_to_model(dict_rank_df, DICT_Rank_Toxicity)
 
 # 1) Deduplicate aids that don't have a corresponding entry
 bioassays_df = bioassays_df.drop_duplicates(subset=["aid"], keep="first")
@@ -263,15 +321,21 @@ if len(syn_removed_df) > 0:
 synonyms_df = syn_kept_df
 
 # 1) Deduplicate toxicity rows
-toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid"], keep="first")
-substance_toxicity_df = substance_toxicity_df.drop_duplicates(subset=["sid"], keep="first")
+toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid", "tox_dataset"], keep="first")
+substance_toxicity_df = substance_toxicity_df.drop_duplicates(subset=["sid", "tox_dataset"], keep="first")
 
 # 2) Filter toxicity rows to only CIDs that exist in compounds_df
 cids_in_compounds = set(compounds_df["cid"].dropna().astype(int))
 
 toxicity_df["pubchem_cid"] = pd.to_numeric(toxicity_df["pubchem_cid"], errors="coerce")
-toxicity_df = toxicity_df.dropna(subset=["pubchem_cid"])
+toxicity_df = toxicity_df.dropna(subset=["pubchem_cid", "tox_dataset"])
 toxicity_df["pubchem_cid"] = toxicity_df["pubchem_cid"].astype(int)
+
+if "dili_severity_grade" in toxicity_df.columns:
+    # Force non-numeric strings like "Not Applicable" into NaN (which become NULL)
+    toxicity_df["dili_severity_grade"] = pd.to_numeric(toxicity_df["dili_severity_grade"], errors="coerce")
+
+substance_toxicity_df = substance_toxicity_df.dropna(subset=["tox_dataset"])
 
 tox_missing_mask = ~toxicity_df["pubchem_cid"].isin(cids_in_compounds)
 tox_removed_df = toxicity_df[tox_missing_mask].copy()
@@ -295,6 +359,34 @@ if len(tox_removed_df) > 0:
     )
 
 toxicity_df = tox_kept_df
+
+# FK safety: filter DILIst rows to CIDs that exist in compounds_df
+diril_missing_mask = ~diril_df["pubchem_cid"].isin(cids_in_compounds)
+if diril_missing_mask.any():
+    diril_df[diril_missing_mask].to_csv(
+        os.path.join(
+            os.getcwd(),
+            f"seeding/error_logs/removed_diril_rows_missing_cid_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        ),
+        index=False,
+    )
+    print(f"[DILIst] Dropped {diril_missing_mask.sum()} rows with no matching CID in pubchem_compounds")
+diril_df = diril_df[~diril_missing_mask]
+print(f"[DILIst] Seeding {len(diril_df)} rows")
+
+# FK safety: filter DILIrank rows to CIDs that exist in compounds_df
+dict_rank_missing_mask = ~dict_rank_df["pubchem_cid"].isin(cids_in_compounds)
+if dict_rank_missing_mask.any():
+    dict_rank_df[dict_rank_missing_mask].to_csv(
+        os.path.join(
+            os.getcwd(),
+            f"seeding/error_logs/removed_dict_rank_rows_missing_cid_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        ),
+        index=False,
+    )
+    print(f"[DILIrank] Dropped {dict_rank_missing_mask.sum()} rows with no matching CID in pubchem_compounds")
+dict_rank_df = dict_rank_df[~dict_rank_missing_mask]
+print(f"[DILIrank] Seeding {len(dict_rank_df)} rows")
 
 
 # Insert into tables named by the ORM models
@@ -339,4 +431,10 @@ substance_synonyms_df.to_sql(
 )
 substance_toxicity_df.to_sql(
     name=SubstanceToxicity.__tablename__, con=engine, if_exists="append", index=False
+)
+diril_df.to_sql(
+    name=DIRIL_Toxicity.__tablename__, con=engine, if_exists="append", index=False
+)
+dict_rank_df.to_sql(
+    name=DICT_Rank_Toxicity.__tablename__, con=engine, if_exists="append", index=False
 )

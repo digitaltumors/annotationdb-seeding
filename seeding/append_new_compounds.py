@@ -121,6 +121,8 @@ def insert_ignore(df: pd.DataFrame, model, engine, label: str, dry_run: bool):
     inserted = 0
     for start in range(0, len(df), chunk_size):
         chunk = df.iloc[start : start + chunk_size]
+        # Safely convert NaN/NaT to None so SQLAlchemy inserts NULL
+        chunk = chunk.where(pd.notnull(chunk), None)
         records = chunk.to_dict("records")
         stmt = mysql_insert(model.__table__).values(records).prefix_with("IGNORE")
         with engine.begin() as conn:
@@ -237,7 +239,7 @@ def main():
     if toxicity_df is not None:
         if "pubchem_cid" in toxicity_df.columns:
             toxicity_df["pubchem_cid"] = pd.to_numeric(toxicity_df["pubchem_cid"], errors="coerce")
-            toxicity_df = toxicity_df.dropna(subset=["pubchem_cid"])
+            toxicity_df = toxicity_df.dropna(subset=["pubchem_cid", "tox_dataset"])
             toxicity_df["pubchem_cid"] = toxicity_df["pubchem_cid"].astype(int)
 
         valid_cids = set(compounds_df["cid"].dropna().astype(int))
@@ -246,7 +248,15 @@ def main():
         if before != len(toxicity_df):
             print(f"  [toxicity] Dropped {before - len(toxicity_df):,} rows with unknown CIDs.")
 
-        toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid"], keep="first")
+        if {"pubchem_cid", "tox_dataset"}.issubset(toxicity_df.columns):
+            toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid", "tox_dataset"], keep="first")
+        else:
+            toxicity_df = toxicity_df.drop_duplicates(subset=["pubchem_cid"], keep="first")
+            
+        if "dili_severity_grade" in toxicity_df.columns:
+            # Force non-numeric strings like "Not Applicable" into NaN (which become NULL)
+            toxicity_df["dili_severity_grade"] = pd.to_numeric(toxicity_df["dili_severity_grade"], errors="coerce")
+
         toxicity_df = align_to_model(toxicity_df, Toxicity)
 
     # --- Clean chembl mechanism ---
