@@ -26,7 +26,7 @@ from pathlib import Path
 # Configuration
 # ============================================================================
 BUCKET = "gs://annotationdb_data_retrieval"
-DEFAULT_INPUT_CSV = f"{BUCKET}/input/Drug-Induced-Liver-Injury-Severity-and-Toxicity-(DILIst).csv"
+DEFAULT_INPUT_CSV = f"{BUCKET}/input/arpa-overlap-2.csv"
 OUTPUT_PREFIX = f"{BUCKET}/output"
 BATCHES_PREFIX = f"{BUCKET}/batches"
 
@@ -61,7 +61,12 @@ def gsutil_cp(local_path: str, gcs_path: str):
 
 
 def load_master_ids(csv_text: str) -> list[dict]:
-    """Parse master CSV and return list of rows as dicts."""
+    """
+	Parse master CSV and return list of rows as dicts. 
+	Skip \ufeff character from uft-8 exported csv
+	"""
+    if csv_text.startswith('\ufeff'):
+        csv_text = csv_text[1:]
     reader = csv.DictReader(io.StringIO(csv_text))
     rows = list(reader)
     return rows
