@@ -96,7 +96,7 @@ class Compounds(Base):
         lazy="noload",
     )
 
-    toxicity: Mapped["Toxicity"] = relationship(
+    toxicity: Mapped[list["Toxicity"]] = relationship(
         "Toxicity",
         back_populates="compound",
         lazy="noload",
@@ -195,12 +195,13 @@ class Toxicity(Base):
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
     )
-    reference_number: Mapped[int] = mapped_column(Integer)
-    dili_dataset: Mapped[str] = mapped_column(String(50))
-    dili_severity_grade: Mapped[int] = mapped_column(Integer)
-    dili_annotation: Mapped[str] = mapped_column(Text)
-    dili_source_url: Mapped[str] = mapped_column(String(50))
+    reference_number: Mapped[int] = mapped_column(Integer, nullable=True)
+    tox_dataset: Mapped[str] = mapped_column(String(100), primary_key=True)
+    dili_severity_grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    dili_annotation: Mapped[str] = mapped_column(Text, nullable=True)
+    tox_source_url: Mapped[str] = mapped_column(Text)
     hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score_reasoning: Mapped[str] = mapped_column(Text)
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
@@ -294,7 +295,7 @@ class Substances(Base):
         lazy="noload",
     )
 
-    toxicity: Mapped["SubstanceToxicity"] = relationship(
+    toxicity: Mapped[list["SubstanceToxicity"]] = relationship(
         "SubstanceToxicity",
         back_populates="substance",
         lazy="noload",
@@ -326,12 +327,13 @@ class SubstanceToxicity(Base):
         ForeignKey("substances.sid", ondelete="CASCADE"),
         primary_key=True,
     )
-    reference_number: Mapped[int] = mapped_column(Integer)
-    dili_dataset: Mapped[str] = mapped_column(String(50))
-    dili_severity_grade: Mapped[int] = mapped_column(Integer)
-    dili_annotation: Mapped[str] = mapped_column(Text)
-    dili_source_url: Mapped[str] = mapped_column(String(50))
+    reference_number: Mapped[int] = mapped_column(Integer, nullable=True)
+    tox_dataset: Mapped[str] = mapped_column(String(100), primary_key=True)
+    dili_severity_grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    dili_annotation: Mapped[str] = mapped_column(Text, nullable=True)
+    tox_source_url: Mapped[str] = mapped_column(Text)
     hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score_reasoning: Mapped[str] = mapped_column(Text)
 
     substance: Mapped["Substances"] = relationship(
         "Substances",
