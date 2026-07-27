@@ -1,4 +1,5 @@
 #!/usr/bin/env Rscript
+# For a local E2E scraping
 
 suppressPackageStartupMessages({
     library(data.table)
@@ -15,10 +16,13 @@ printf <- function(...) {
 # CONFIGURATION
 # ---------------------------
 # Edit these values to change the default behavior
-in_csv <- "output_data/union/complete/DFM-JUMP-CP-Training-Combined.csv" # The master CSV mapping input_ids to PubChem CIDs
-out_dir <- "output_data/union/complete"
+in_csv <- NULL # REQUIRED: pass via --in_csv
+out_dir <- tempfile("annotationdb_run_") # default: OS temp dir
 batch_size <- 50
 max_cycles <- 999999
+gcs_bucket <- NULL
+run_id <- format(Sys.time(), "%Y%m%d_%H%M%S") # unique label for this run's batches
+merge_py <- NULL
 
 # ---------------------------
 # ARGUMENT PARSING (Overrides CONFIG)
@@ -44,12 +48,31 @@ if (!is.null(args$in_csv)) in_csv <- args$in_csv
 if (!is.null(args$batch_size)) batch_size <- as.integer(args$batch_size)
 if (!is.null(args$max_cycles)) max_cycles <- as.integer(args$max_cycles)
 if (!is.null(args$out_dir)) out_dir <- args$out_dir
+if (!is.null(args$gcs_bucket)) gcs_bucket <- args$gcs_bucket
+if (!is.null(args$run_id)) run_id <- args$run_id
+if (!is.null(args$merge_py)) merge_py <- args$merge_py
+
+if (is.null(in_csv)) stop("--in_csv is required. Provide the master input CSV path.")
+
+# Auto-detect merge_outputs.py next to this script if not provided
+if (is.null(merge_py)) {
+    # Reliably find the script's own directory under Rscript
+    script_args <- commandArgs(trailingOnly = FALSE)
+    file_flag <- script_args[startsWith(script_args, "--file=")]
+    script_dir <- if (length(file_flag) > 0) {
+        dirname(normalizePath(sub("^--file=", "", file_flag[1])))
+    } else {
+        getwd() # fallback when sourced interactively
+    }
+    candidate <- file.path(script_dir, "merge_outputs.py")
+    if (file.exists(candidate)) merge_py <- candidate
+}
 
 # ---------------------------
 # SETUP
 # ---------------------------
 if (!file.exists(in_csv)) {
-    stop(sprintf("Input CSV missing: %s. Please edit the 'in_csv' variable in the script or provide it via --in_csv.", in_csv))
+    stop(sprintf("Input CSV missing: %s. Provide it via --in_csv.", in_csv))
 }
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -57,24 +80,68 @@ batch_input_ids_path <- file.path(out_dir, "batch_input_ids.csv")
 union_out_path <- file.path(out_dir, "union_out.csv")
 failed_input_ids_path <- file.path(out_dir, "failed_input_ids.csv")
 
-# These are the scripts you run in the coordinator
+printf("[%s] Working directory: %s", ts(), out_dir)
+if (!is.null(gcs_bucket)) printf("[%s] GCS bucket: %s  run_id: %s", ts(), gcs_bucket, run_id)
+
+# ---------------------------------------------------------------------------
+# Download GCS master progress files for resume
+# Only downloads a file if it doesn't already exist locally.
+# ---------------------------------------------------------------------------
+if (!is.null(gcs_bucket)) {
+    printf("[%s] Downloading existing progress from GCS for resume...", ts())
+    for (fname in c("union_out.csv", "toxicity_output.csv", "failed_input_ids.csv")) {
+        local_path <- file.path(out_dir, fname)
+        if (!file.exists(local_path)) {
+            gcs_src <- sprintf("%s/output/%s", gcs_bucket, fname)
+            ret <- system(sprintf("gsutil -o 'GSUtil:parallel_process_count=1' -q cp '%s' '%s' 2>/dev/null", gcs_src, local_path))
+            if (ret == 0) {
+                printf("[%s]   Restored %-35s from GCS.", ts(), fname)
+            } else {
+                printf("[%s]   %-35s not in GCS yet (fresh start).", ts(), fname)
+            }
+        } else {
+            printf("[%s]   %-35s already exists locally (skipping download).", ts(), fname)
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Pipeline step commands — all write to the shared out_dir
+# ---------------------------------------------------------------------------
 pubchem_cmd <- function() {
     sprintf(
-        "Rscript pubchem_drug_extraction_from_input_ids.R --in_csv '%s'",
-        batch_input_ids_path
+        "Rscript pubchem_drug_extraction_from_input_ids.R --in_csv '%s' --out_dir '%s'",
+        batch_input_ids_path, out_dir
     )
 }
 assay_cmd <- function() {
     sprintf(
-        "Rscript assay_extraction_input_ids.R --batch_input_ids '%s'",
-        batch_input_ids_path
+        "Rscript assay_extraction_input_ids.R --batch_input_ids '%s' --out_dir '%s'",
+        batch_input_ids_path, out_dir
     )
 }
 tox_cmd <- function() {
     sprintf(
-        "Rscript toxicity_extraction_input_ids.R --batch_input_ids '%s'",
-        batch_input_ids_path
+        "Rscript toxicity_extraction_input_ids.R --batch_input_ids '%s' --out_dir '%s'",
+        batch_input_ids_path, out_dir
     )
+}
+
+# Upload out_dir CSVs to a named GCS output_batches folder
+gcs_upload_batch <- function(cycle_num) {
+    if (is.null(gcs_bucket)) {
+        return(invisible(NULL))
+    }
+    batch_name <- sprintf("local_%s_c%04d", run_id, cycle_num)
+    gcs_dest <- sprintf("%s/output_batches/%s/", gcs_bucket, batch_name)
+    printf("[%s] Uploading cycle %d outputs → %s", ts(), cycle_num, gcs_dest)
+    # Use || true so a partial upload (e.g. some files missing) doesn't abort
+    ret <- system(sprintf(
+        "gsutil -m -q cp '%s'/*.csv '%s' 2>/dev/null || true",
+        out_dir, gcs_dest
+    ))
+    printf("[%s] GCS batch upload done: %s", ts(), batch_name)
+    invisible(ret)
 }
 
 # Load master mapping
@@ -119,7 +186,7 @@ for (cand in c("InChiKey", "inchikey", "InChIKey")) {
 }
 
 if (is.null(cid_col) && is.null(inchikey_col)) {
-    stop("Master CSV must contain either a 'cid' or an 'InChiKey' column for resolution.")
+    printf("[%s] Master CSV does not contain a 'cid' or 'InChiKey' column. Will attempt Name-to-CID resolution via AnnotationGx.", ts())
 }
 
 master_ids <- unique(as.character(master[[input_id_col]]))
@@ -207,6 +274,20 @@ repeat {
 
     if (length(remaining) == 0) {
         printf("[%s] All done. Exiting.", ts())
+
+        # Run merge_outputs.py to consolidate all GCS batches into master output/
+        if (!is.null(gcs_bucket) && !is.null(merge_py)) {
+            printf("[%s] Running merge_outputs.py to consolidate GCS master files...", ts())
+            ret <- system(sprintf("python3 '%s'", merge_py))
+            if (ret == 0) {
+                printf("[%s] Merge complete. Master files updated at %s/output/", ts(), gcs_bucket)
+            } else {
+                printf("[%s] WARNING: merge_outputs.py exited with code %d — run it manually.", ts(), ret)
+            }
+        } else if (!is.null(gcs_bucket)) {
+            printf("[%s] NOTE: pass --merge_py <path/to/merge_outputs.py> to auto-merge after run.", ts())
+        }
+
         break
     }
 
@@ -226,9 +307,12 @@ repeat {
     # Core script: if this fails, we STOP because it's the foundation for the others
     run(pubchem_cmd(), stop_on_error = TRUE)
 
-    # Follow-up scripts: we warn but continue,as the gap-detection will pick them up later
+    # Follow-up scripts: we warn but continue, gap-detection will pick them up later
     run(assay_cmd(), stop_on_error = FALSE)
     run(tox_cmd(), stop_on_error = FALSE)
+
+    # Upload this cycle's outputs to GCS output_batches/
+    gcs_upload_batch(cycle)
 
     # Optimization: Update cached progress locally so we don't reload the 1GB file
     done_ids <- unique(c(done_ids, batch_ids))

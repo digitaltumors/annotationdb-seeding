@@ -3,7 +3,7 @@ import os
 import shutil
 
 def main():
-    data_dir = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_15_2026"
+    data_dir = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/may_20_2026"
     
     union_out_path = os.path.join(data_dir, "union_out.csv")
     toxicity_path = os.path.join(data_dir, "toxicity_output.csv")

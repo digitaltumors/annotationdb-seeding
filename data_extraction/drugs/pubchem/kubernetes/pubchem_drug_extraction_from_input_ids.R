@@ -388,6 +388,15 @@ if (is.null(input_id_col)) {
     }
 }
 
+# Find a dedicated search column (e.g. 'name') to use for PubChem querying
+search_col <- NULL
+for (cand in c("name", "drug", "substance", "synonym")) {
+    if (cand %in% cn && cand != input_id_col) {
+        search_col <- cand
+        break
+    }
+}
+
 # InChIKey column guess
 inchikey_col <- NULL
 for (cand in c("InChiKey", "inchikey", "InChIKey")) {
@@ -401,6 +410,12 @@ for (cand in c("InChiKey", "inchikey", "InChIKey")) {
 res_inp <- data.table(input_id = as.character(inp[[input_id_col]]))
 if (!is.null(cid_col)) res_inp[, cid := as.character(inp[[cid_col]])] else res_inp[, cid := NA_character_]
 if (!is.null(inchikey_col)) res_inp[, inchikey := as.character(inp[[inchikey_col]])] else res_inp[, inchikey := NA_character_]
+
+if (!is.null(search_col)) {
+    res_inp[, search_name := as.character(inp[[search_col]])]
+} else {
+    res_inp[, search_name := input_id]
+}
 
 # ---------------------------
 # CID RESOLUTION (by InChIKey)
@@ -451,14 +466,20 @@ if (any(needs_res) && !is.null(inchikey_col)) {
 # ---------------------------
 needs_res <- is.na(res_inp$cid) | !nzchar(trimws(as.character(res_inp$cid))) | res_inp$cid == "0"
 if (any(needs_res)) {
-    names_to_res <- unique(res_inp[needs_res & !is.na(input_id) & nzchar(input_id), input_id])
+    names_to_res <- unique(res_inp[needs_res & !is.na(search_name) & nzchar(search_name), search_name])
     if (length(names_to_res) > 0) {
+        printf("[%s] Missing CIDs for %d names. Querying AnnotationGx::mapCompound2CID...", ts(), length(names_to_res))
+        
         # Random stagger to spread out concurrent pods hitting the PubChem API simultaneously
         stagger <- runif(1, 0, 15)
         printf("[%s] Staggering name resolution by %.1fs to avoid API rate-limiting...", ts(), stagger)
         Sys.sleep(stagger)
 
         printf("[%s] Resolving %d unique Name(s) to CIDs using AnnotationGx...", ts(), length(names_to_res))
+
+        # Log a sample of compounds to show exactly what search_col picked up
+        sample_names <- head(names_to_res, 50)
+        printf("[%s]   -> Names to query (showing up to 50): %s", ts(), paste(sample_names, collapse = ", "))
 
         tryCatch(
             {
@@ -472,10 +493,10 @@ if (any(needs_res)) {
 
                     if (nrow(name_map_df) > 0) {
                         nm_vec <- setNames(as.character(name_map_df$cids), as.character(name_map_df$name))
-                        resolved_mask <- needs_res & (res_inp$input_id %in% names(nm_vec))
+                        resolved_mask <- needs_res & (res_inp$search_name %in% names(nm_vec))
 
                         if (any(resolved_mask)) {
-                            res_inp[resolved_mask, cid := nm_vec[input_id]]
+                            res_inp[resolved_mask, cid := nm_vec[search_name]]
                             printf("[%s] Successfully resolved %d names to CIDs via AnnotationGx.", ts(), length(unique(res_inp[resolved_mask, input_id])))
                         }
                     } else {
@@ -558,7 +579,7 @@ if (file.exists(master_union_path)) {
 # ---------------------------
 # MAPPED_NAME WORKFLOW ADJUSTMENT
 # ---------------------------
-cid_to_input <- inp[, .(mapped_name_new = paste(unique(input_id), collapse = "; ")), by = cid]
+cid_to_input <- res_inp[, .(mapped_name_new = paste(unique(input_id), collapse = "; ")), by = cid]
 
 # Now compute props_todo ONLY for CIDs NOT already present
 props_todo <- setdiff(run_cids, already_done_cids)
@@ -582,10 +603,12 @@ fetch_props_split <- function(cids, max_retries = 3, sleep_base = 1) {
             out <- tryCatch(
                 {
                     setTimeLimit(elapsed = CALL_TIMEOUT, transient = TRUE)
-                    on.exit(setTimeLimit(elapsed = Inf, transient = FALSE), add = TRUE)
-                    AnnotationGx::mapCID2Properties(ids = cids_num, properties = properties)
+                    res <- AnnotationGx::mapCID2Properties(ids = cids_num, properties = properties)
+                    setTimeLimit(elapsed = Inf, transient = FALSE)
+                    res
                 },
                 error = function(e) {
+                    setTimeLimit(elapsed = Inf, transient = FALSE)
                     write_error_log(
                         error_log_path,
                         "mapCID2Properties_error",
@@ -790,6 +813,63 @@ fetch_chembl_phase <- function(chembl_id) {
     phase
 }
 
+fetch_chembl_id_bulk <- function(cids, max_retries = 3, base_wait = 1.0) {
+    cids <- unique(as.character(cids))
+    cids <- cids[!is.na(cids) & nzchar(cids)]
+    if (length(cids) == 0) {
+        return(character(0))
+    }
+
+    url <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/%s/xrefs/RegistryID/JSON", paste(cids, collapse = ","))
+
+    for (i in seq_len(max_retries)) {
+        res <- tryCatch(
+            {
+                resp <- httr::GET(url, httr::timeout(30), httr::user_agent("AnnotationDB/overlap (ChEMBL bulk fallback)"))
+                sc <- httr::status_code(resp)
+                if (sc == 200) {
+                    txt <- httr::content(resp, as = "text", encoding = "UTF-8")
+                    j <- jsonlite::fromJSON(txt, simplifyVector = FALSE)
+                    infos <- j$InformationList$Information
+
+                    mapped <- character(length(cids))
+                    names(mapped) <- cids
+
+                    for (info in infos) {
+                        cid_val <- as.character(info$CID)
+                        rids <- unlist(info$RegistryID)
+                        chembl_hits <- grep("^CHEMBL[0-9]+", rids, value = TRUE)
+                        if (length(chembl_hits) > 0) {
+                            mapped[cid_val] <- chembl_hits[1]
+                        }
+                    }
+                    return(mapped)
+                } else if (sc == 404) {
+                    # Normal: none of the CIDs have cross-references
+                    mapped <- character(length(cids))
+                    names(mapped) <- cids
+                    return(mapped)
+                } else {
+                    "RETRY"
+                }
+            },
+            error = function(e) "RETRY"
+        )
+
+        if (!identical(res, "RETRY")) {
+            return(res)
+        }
+
+        if (i < max_retries) {
+            Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.5))
+        }
+    }
+
+    mapped <- character(length(cids))
+    names(mapped) <- cids
+    return(mapped)
+}
+
 .chembl_consecutive_api_blocks <- 0L
 
 annotate_chembl_id_one <- function(cid, max_retries = 3, base_wait = 1.0) {
@@ -823,11 +903,15 @@ annotate_chembl_id_one <- function(cid, max_retries = 3, base_wait = 1.0) {
 
         if (!api_blocked) {
             .chembl_consecutive_api_blocks <<- 0L
-            if (is.null(out)) return(NA_character_)
+            if (is.null(out)) {
+                return(NA_character_)
+            }
             x <- as.character(out)
             x <- unique(trimws(x))
             x <- x[!is.na(x) & nzchar(x)]
-            if (!length(x)) return(NA_character_)
+            if (!length(x)) {
+                return(NA_character_)
+            }
             return(paste(x, collapse = ";"))
         }
 
@@ -849,11 +933,14 @@ if (!is.null(props_dt_all) && NROW(props_dt_all) > 0) {
     if (!"molecule_chembl_id" %in% names(props_dt_all)) {
         props_dt_all[, molecule_chembl_id := NA_character_]
     }
+    if (!"molecule_chembl_id_from_synonyms" %in% names(props_dt_all)) {
+        props_dt_all[, molecule_chembl_id_from_synonyms := FALSE]
+    }
 
     missing_idx <- is.na(props_dt_all$molecule_chembl_id) | !nzchar(trimws(as.character(props_dt_all$molecule_chembl_id)))
     if (any(missing_idx)) {
         cids_to_annotate <- props_dt_all$cid[missing_idx]
-        printf("[%s] Annotating ChEMBL ID for %d CID(s)", ts(), length(cids_to_annotate))
+        printf("[%s] Annotating ChEMBL ID for %d CID(s) via AnnotationGx", ts(), length(cids_to_annotate))
 
         props_dt_all[missing_idx, molecule_chembl_id := vapply(
             cids_to_annotate,
@@ -872,6 +959,41 @@ if (!is.null(props_dt_all) && NROW(props_dt_all) > 0) {
         },
         character(1)
     )]
+
+    # Fallback to PUG REST (bulk) for any that are STILL missing
+    still_missing_idx <- is.na(props_dt_all$molecule_chembl_id) | !nzchar(trimws(as.character(props_dt_all$molecule_chembl_id)))
+    still_missing_cids <- unique(props_dt_all$cid[still_missing_idx])
+    still_missing_cids <- still_missing_cids[!is.na(still_missing_cids)]
+
+    if (length(still_missing_cids) > 0) {
+        printf("[%s] Fallback: Annotating ChEMBL ID for %d remaining CID(s) via PUG REST synonyms...", ts(), length(still_missing_cids))
+
+        chunk_size <- 100
+        chunks <- split(still_missing_cids, ceiling(seq_along(still_missing_cids) / chunk_size))
+
+        chembl_map <- new.env(hash = TRUE)
+        for (i in seq_along(chunks)) {
+            chunk <- chunks[[i]]
+            res <- fetch_chembl_id_bulk(chunk, max_retries = 3)
+            for (cid_k in names(res)) {
+                if (!is.na(res[[cid_k]]) && nzchar(res[[cid_k]])) {
+                    chembl_map[[cid_k]] <- res[[cid_k]]
+                }
+            }
+            Sys.sleep(0.25)
+        }
+
+        # Apply the fallback results and set the flag
+        props_dt_all[still_missing_idx, `:=`(
+            molecule_chembl_id = vapply(cid, function(c) {
+                val <- chembl_map[[as.character(c)]]
+                if (is.null(val)) NA_character_ else val
+            }, character(1)),
+            molecule_chembl_id_from_synonyms = vapply(cid, function(c) {
+                !is.null(chembl_map[[as.character(c)]])
+            }, logical(1))
+        )]
+    }
 
     if (!"chembl_max_phase" %in% names(props_dt_all)) {
         props_dt_all[, chembl_max_phase := NA_integer_]

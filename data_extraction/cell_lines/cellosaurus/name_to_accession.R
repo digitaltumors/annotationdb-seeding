@@ -2,11 +2,12 @@
 library(AnnotationGx)
 library(data.table)
 
-file <- read.csv("input_data/unmatched_cell_lines_adjusted.csv")
-names <- file$modified_name
+file <- read.csv("input_data/nci60_cell_lines.csv")
+names <- file$name
 
 # Map cell lines to cellosaurus accessions
 samples <- mapCell2Accession(names)
+samples <- samples[!is.na(samples$accession)]
 
 # Get existing cell line accession list and see which compare with new accessions to find any unique
 existing_accessions <- read.csv("input_data/cellosaurus_ids.csv")
@@ -25,5 +26,3 @@ write.table(
     quote = TRUE,
     append = TRUE
 )
-
-

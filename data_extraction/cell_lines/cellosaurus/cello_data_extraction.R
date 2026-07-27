@@ -40,9 +40,7 @@ fields <- c(
   "msi", "miscellaneous", "misspelling", "mab-isotype", "mab-target", "omics",
   "part-of", "population", "problematic", "resistance", "senescence",
   "integrated", "transformant", "virology", "cc", "str", "di", "din", "dio",
-  "ox", "sx", "ag", "oi", "hi", "ch", "ca", "dt", "dtc", "dtu", "dtv",
-  # --- minimal addition so we can export diseases too ---
-  "diseases"
+  "ox", "sx", "ag", "oi", "hi", "ch", "ca", "dt", "dtc", "dtu", "dtv"
 )
 field_data <- annotateCellAccession(cell_lines, to = fields)
 field_data_flat <- as.data.frame(lapply(field_data, flatten_col), stringsAsFactors = FALSE)

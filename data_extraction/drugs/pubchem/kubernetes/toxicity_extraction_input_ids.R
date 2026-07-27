@@ -124,14 +124,15 @@ log_error <- function(pubchem_cid, detail) {
 
 empty_row <- function(pubchem_cid) {
     data.frame(
-        pubchem_cid                     = pubchem_cid,
-        reference_number                = NA_character_,
-        dili_dataset                    = NA_character_,
-        dili_severity_grade             = NA_character_,
-        dili_annotation                 = NA_character_,
-        dili_source_url                 = NA_character_,
+        pubchem_cid = pubchem_cid,
+        reference_number = NA_character_,
+        tox_dataset = NA_character_,
+        dili_severity_grade = NA_character_,
+        dili_annotation = NA_character_,
+        tox_source_url = NA_character_,
         hepatotoxicity_likelihood_score = NA_character_,
-        stringsAsFactors                = FALSE
+        hepatotoxicity_likelihood_score_reasoning = NA_character_,
+        stringsAsFactors = FALSE
     )
 }
 
@@ -162,7 +163,10 @@ get_done_cids <- function(path) {
 # ---------------------------------------------------------------------------
 # Load union_out.csv
 # ---------------------------------------------------------------------------
-if (!file.exists(prop_out)) stop("union_out.csv not found: ", prop_out)
+if (!file.exists(prop_out)) {
+    cat(sprintf("[%s] No union_out.csv yet (%s). Nothing to do.\n", ts(), prop_out))
+    quit(save = "no", status = 0)
+}
 props <- fread(prop_out, fill = TRUE)
 if (!"cid" %in% names(props)) stop("union_out.csv must have a 'cid' column")
 props[, cid := trimws(as.character(cid))]
@@ -259,29 +263,45 @@ get_tox <- function(pubchem_cid) {
         return(empty_row(pubchem_cid))
     }
 
-    resp <- tryCatch(GET(url, timeout(30)), error = function(e) e)
+    attempts <- 0L
+    max_attempts <- 3L
+    success <- FALSE
+    resp <- NULL
 
-    is_block <- inherits(resp, "error") ||
-        (!inherits(resp, "error") && http_error(resp) && status_code(resp) %in% c(429L, 502L, 503L, 504L))
+    while (attempts < max_attempts && !success) {
+        attempts <- attempts + 1L
+        resp <- tryCatch(GET(url, timeout(30)), error = function(e) e)
 
-    if (is_block) {
-        .consecutive_blocks <<- .consecutive_blocks + 1L
-        if (.consecutive_blocks >= 3L) {
-            extra <- .consecutive_blocks * 5L
-            cat(sprintf("[%s] Backing off %ds (consecutive blocks: %d)\n", ts(), extra, .consecutive_blocks))
-            Sys.sleep(extra)
+        is_block <- inherits(resp, "error") ||
+            (!inherits(resp, "error") && http_error(resp) && status_code(resp) %in% c(429L, 502L, 503L, 504L))
+
+        if (is_block) {
+            .consecutive_blocks <<- .consecutive_blocks + 1L
+            if (attempts < max_attempts) {
+                cat(sprintf("[%s] API failure. Retry %d/%d for CID %s in 3s...\n", ts(), attempts, max_attempts, pubchem_cid))
+                Sys.sleep(3)
+            } else if (.consecutive_blocks >= 3L) {
+                extra <- .consecutive_blocks * 5L
+                cat(sprintf("[%s] Backing off %ds (consecutive blocks: %d)\n", ts(), extra, .consecutive_blocks))
+                Sys.sleep(extra)
+            }
+        } else {
+            .consecutive_blocks <<- 0L
+            success <- TRUE
         }
-    } else {
-        .consecutive_blocks <<- 0L
     }
 
     if (inherits(resp, "error")) {
         log_error(pubchem_cid, resp$message)
-        return(empty_row(pubchem_cid))
+        return(NULL)
     }
     if (http_error(resp)) {
         log_error(pubchem_cid, paste("HTTP", status_code(resp)))
-        return(empty_row(pubchem_cid))
+        if (status_code(resp) == 404L) {
+            return(empty_row(pubchem_cid))
+        } else {
+            return(NULL)
+        }
     }
 
     x <- tryCatch(content(resp, as = "parsed", type = "application/json"), error = function(e) e)
@@ -342,10 +362,10 @@ get_tox <- function(pubchem_cid) {
             dili_rows[[length(dili_rows) + 1L]] <- data.frame(
                 pubchem_cid = pubchem_cid,
                 reference_number = ref_num,
-                dili_dataset = dataset,
+                tox_dataset = dataset,
                 dili_severity_grade = sev_grade,
                 dili_annotation = ann,
-                dili_source_url = source_url,
+                tox_source_url = source_url,
                 stringsAsFactors = FALSE
             )
         }
@@ -354,6 +374,8 @@ get_tox <- function(pubchem_cid) {
     # ---- Hepatotoxicity: extract "Likelihood score: X" string ----
     hep_sections <- find_sections(all_sections, "Hepatotoxicity")
     hep_score <- NA_character_
+    hep_reasoning <- NA_character_
+    hep_ref <- NA_character_
 
     for (sec in hep_sections) {
         if (is.null(sec$Information)) next
@@ -362,7 +384,14 @@ get_tox <- function(pubchem_cid) {
             if (is.null(swm_list)) next
             for (swm in swm_list) {
                 if (!is.null(swm$String) && grepl("Likelihood score:", swm$String, fixed = TRUE)) {
-                    hep_score <- swm$String
+                    m <- regmatches(swm$String, regexec("Likelihood score:\\s*([A-Za-z0-9\\[\\]\\*]+)\\s*\\((.*?)\\)", swm$String))
+                    if (length(m[[1]]) == 3) {
+                        hep_score <- trimws(m[[1]][2])
+                        hep_reasoning <- trimws(m[[1]][3])
+                    } else {
+                        hep_score <- swm$String
+                    }
+                    hep_ref <- as.character(info_entry$ReferenceNumber %||% "NA")
                     break
                 }
             }
@@ -371,22 +400,36 @@ get_tox <- function(pubchem_cid) {
         if (!is.na(hep_score)) break
     }
 
-    # Fan hep_score across all DILI rows; fall back to one NA sentinel if no DILI data
-    if (length(dili_rows) > 0L) {
-        out <- do.call(rbind, dili_rows)
-        out$hepatotoxicity_likelihood_score <- hep_score
-        out
-    } else {
-        data.frame(
+    # Set hepatotoxicity_likelihood_score to NA for all DILI rows
+    for (i in seq_along(dili_rows)) {
+        dili_rows[[i]]$hepatotoxicity_likelihood_score <- NA_character_
+        dili_rows[[i]]$hepatotoxicity_likelihood_score_reasoning <- NA_character_
+    }
+
+    # Add Hepatotoxicity as its own dedicated row if it exists
+    if (!is.na(hep_score)) {
+        hep_ref_entry <- if (!is.na(hep_ref) && hep_ref != "NA") ref_lookup[[hep_ref]] else NULL
+        hep_source_url <- if (!is.null(hep_ref_entry)) hep_ref_entry$url %||% NA_character_ else NA_character_
+
+        dili_rows[[length(dili_rows) + 1L]] <- data.frame(
             pubchem_cid = pubchem_cid,
-            reference_number = NA_character_,
-            dili_dataset = NA_character_,
+            reference_number = hep_ref,
+            tox_dataset = "Livertox",
             dili_severity_grade = NA_character_,
             dili_annotation = NA_character_,
-            dili_source_url = NA_character_,
+            tox_source_url = hep_source_url,
             hepatotoxicity_likelihood_score = hep_score,
+            hepatotoxicity_likelihood_score_reasoning = hep_reasoning,
             stringsAsFactors = FALSE
         )
+    }
+
+    if (length(dili_rows) > 0L) {
+        out <- do.call(rbind, dili_rows)
+        out
+    } else {
+        # Return an empty row but don't include it in final output, so no pk constraint fails.
+        empty_row(pubchem_cid)
     }
 }
 
@@ -413,7 +456,7 @@ for (b in seq_along(batches)) {
 
         rows[[i]] <- tryCatch(get_tox(cid), error = function(e) {
             log_error(cid, e$message)
-            empty_row(cid)
+            NULL
         })
 
         Sys.sleep(runif(1, 0.75, 1.5))

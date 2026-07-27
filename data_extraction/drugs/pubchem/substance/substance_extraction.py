@@ -10,7 +10,7 @@ Output files:
     substance_out.csv   – sid, title, molecule_chembl_id, chembl_max_phase
     substance_toxicity.csv  – sid, dili_severity_grade, dili_annotation,
                     hepatotoxicity_likelihood_score, reference_number,
-                    dili_dataset, dili_source_url
+                    dili_dataset, tox_source_url
     substance_synonyms.csv  – synonym, sid
 
 Usage:
@@ -309,7 +309,7 @@ def extract_dili_data(record: dict) -> list[dict]:
         - dili_dataset
         - dili_severity_grade
         - dili_annotation
-        - dili_source_url
+        - tox_source_url
     """
     ref_map = _build_reference_map(record)
     results: list[dict] = []
@@ -327,15 +327,15 @@ def extract_dili_data(record: dict) -> list[dict]:
         for rn, info_list in groups.items():
             row = {
                 "reference_number": rn,
-                "dili_dataset": None,
+                "tox_dataset": None,
                 "dili_severity_grade": None,
                 "dili_annotation": None,
-                "dili_source_url": None,
+                "tox_source_url": None,
             }
 
             # Resolve source URL from the Reference block
             ref_meta = ref_map.get(rn, {})
-            row["dili_source_url"] = ref_meta.get("URL")
+            row["tox_source_url"] = ref_meta.get("URL")
 
             for info in info_list:
                 name = (info.get("Name") or "").strip()
@@ -344,7 +344,7 @@ def extract_dili_data(record: dict) -> list[dict]:
                 val = vals[0] if vals else None
 
                 if name_lower == "dataset":
-                    row["dili_dataset"] = val
+                    row["tox_dataset"] = val
                 elif name_lower in SEVERITY_NAMES:
                     row["dili_severity_grade"] = val
                 elif name_lower in ANNOTATION_NAMES:
@@ -355,19 +355,29 @@ def extract_dili_data(record: dict) -> list[dict]:
     return results
 
 
-def extract_hepatotoxicity(record: dict) -> str | None:
+def extract_hepatotoxicity(record: dict) -> tuple[str | None, str | None, str | None]:
     """
-    Extract the hepatotoxicity likelihood score from the Hepatotoxicity section.
-    Matches any StringWithMarkup containing 'Likelihood score:'.
+    Extract the hepatotoxicity likelihood score from the Hepatotoxicity section,
+    along with its reasoning string and LiverTox URL.
     """
+    import re
+    url = None
+    for ref in record.get("Reference", []):
+        if ref.get("SourceName") == "LiverTox":
+            url = ref.get("URL")
+            break
+
     for sec in walk_sections(record.get("Section", [])):
         if sec.get("TOCHeading") != "Hepatotoxicity":
             continue
         for info in sec.get("Information", []):
             for s in _get_string_values(info):
                 if "likelihood score:" in s.lower():
-                    return s.strip()
-    return None
+                    m = re.search(r"Likelihood score:\s*([A-Za-z0-9\*\[\]]+)\s*\((.*?)(?:\)|$)", s, re.IGNORECASE)
+                    if m:
+                        return m.group(1).strip(), m.group(2).strip(), url
+                    return s.strip(), None, url
+    return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +408,7 @@ def process_compound(compound_name: str, refchem_id: str) -> dict | None:
         "chembl_id": extract_chembl_id(record),
         "synonyms": extract_synonyms(record),
         "dili_rows": extract_dili_data(record),
-        "hepatotox_score": extract_hepatotoxicity(record),
+        "hepatotox_data": extract_hepatotoxicity(record),
     }
 
 
@@ -447,14 +457,16 @@ def run_single_sid(sid: int, outdir: str):
     print("[4/4] Extracting fields …")
     print(f"       → ChEMBL ID           : {chembl_id}")
     print(f"       → Synonyms count      : {len(result['synonyms'])}")
-    print(f"       → DILI dataset entries : {len(result['dili_rows'])}")
-    print(f"       → Hepatotox likelihood : {result['hepatotox_score']}")
+    hepatotox_score, hepatotox_reasoning, hepatotox_url = result.get("hepatotox_data", (None, None, None))
+    print(f"       → Hepatotox likelihood : {hepatotox_score}")
 
     # -- substance_out.csv --
     sid_file = os.path.join(outdir, "substance_out.csv")
-    with open(sid_file, "w", newline="", encoding="utf-8") as f:
+    sid_exists = os.path.exists(sid_file) and os.path.getsize(sid_file) > 0
+    with open(sid_file, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["sid", "mapped_name", "title", "molecule_chembl_id", "chembl_max_phase"])
-        w.writeheader()
+        if not sid_exists:
+            w.writeheader()
         w.writerow({
             "sid": sid, "mapped_name": "unknown", "title": result["record_title"],
             "molecule_chembl_id": chembl_id, "chembl_max_phase": max_phase,
@@ -463,32 +475,50 @@ def run_single_sid(sid: int, outdir: str):
 
     # -- substance_toxicity.csv --
     tox_file = os.path.join(outdir, "substance_toxicity.csv")
+    tox_exists = os.path.exists(tox_file) and os.path.getsize(tox_file) > 0
     tox_fields = [
         "sid", "dili_severity_grade", "dili_annotation",
-        "hepatotoxicity_likelihood_score", "reference_number",
-        "dili_dataset", "dili_source_url",
+        "hepatotoxicity_likelihood_score", "hepatotoxicity_likelihood_score_reasoning", "reference_number",
+        "tox_dataset", "tox_source_url",
     ]
-    with open(tox_file, "w", newline="", encoding="utf-8") as f:
+    with open(tox_file, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=tox_fields)
-        w.writeheader()
-        dili_rows = result["dili_rows"] or [{}]
+        if not tox_exists:
+            w.writeheader()
+        
+        dili_rows = result["dili_rows"] or []
         for row in dili_rows:
             w.writerow({
                 "sid": sid,
                 "dili_severity_grade": row.get("dili_severity_grade"),
                 "dili_annotation": row.get("dili_annotation"),
-                "hepatotoxicity_likelihood_score": result["hepatotox_score"],
+                "hepatotoxicity_likelihood_score": None,
+                "hepatotoxicity_likelihood_score_reasoning": None,
                 "reference_number": row.get("reference_number"),
-                "dili_dataset": row.get("dili_dataset"),
-                "dili_source_url": row.get("dili_source_url"),
+                "tox_dataset": row.get("tox_dataset"),
+                "tox_source_url": row.get("tox_source_url"),
+            })
+        
+        if hepatotox_score:
+            w.writerow({
+                "sid": sid,
+                "dili_severity_grade": None,
+                "dili_annotation": None,
+                "hepatotoxicity_likelihood_score": hepatotox_score,
+                "hepatotoxicity_likelihood_score_reasoning": hepatotox_reasoning,
+                "reference_number": None,
+                "tox_dataset": "Livertox",
+                "tox_source_url": hepatotox_url,
             })
     print(f"  ✓ substance_toxicity.csv   → {tox_file}")
 
     # -- substance_synonyms.csv --
     syn_file = os.path.join(outdir, "substance_synonyms.csv")
-    with open(syn_file, "w", newline="", encoding="utf-8") as f:
+    syn_exists = os.path.exists(syn_file) and os.path.getsize(syn_file) > 0
+    with open(syn_file, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["synonym", "sid"])
-        w.writeheader()
+        if not syn_exists:
+            w.writeheader()
         for syn in result["synonyms"]:
             w.writerow({"synonym": syn, "sid": sid})
     print(f"  ✓ substance_synonyms.csv   → {syn_file}")
@@ -512,8 +542,8 @@ def run_batch(outdir: str, compounds_data: list = None):
     sid_fields = ["sid", "mapped_name", "title", "molecule_chembl_id", "chembl_max_phase"]
     tox_fields = [
         "sid", "dili_severity_grade", "dili_annotation",
-        "hepatotoxicity_likelihood_score", "reference_number",
-        "dili_dataset", "dili_source_url",
+        "hepatotoxicity_likelihood_score", "hepatotoxicity_likelihood_score_reasoning", "reference_number",
+        "tox_dataset", "tox_source_url",
     ]
     syn_fields = ["synonym", "sid"]
     log_fields = [
@@ -525,29 +555,63 @@ def run_batch(outdir: str, compounds_data: list = None):
     syn_file = os.path.join(outdir, "substance_synonyms.csv")
     log_file = os.path.join(outdir, "resolution_log.csv")
 
+    sid_exists = os.path.exists(sid_file) and os.path.getsize(sid_file) > 0
+    tox_exists = os.path.exists(tox_file) and os.path.getsize(tox_file) > 0
+    syn_exists = os.path.exists(syn_file) and os.path.getsize(syn_file) > 0
+    log_exists = os.path.exists(log_file) and os.path.getsize(log_file) > 0
+
+    processed_names = set()
+    processed_sids = set()
+
+    if sid_exists:
+        try:
+            with open(sid_file, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get("mapped_name"):
+                        processed_names.add(row["mapped_name"].lower())
+                    if row.get("sid"):
+                        try:
+                            processed_sids.add(int(row["sid"]))
+                        except ValueError:
+                            pass
+        except Exception as e:
+            print(f"Warning: could not read {sid_file} for deduplication: {e}")
+
     total = len(COMPOUNDS)
     success = 0
     failed = 0
+    skipped = 0
 
     with (
-        open(sid_file, "w", newline="", encoding="utf-8") as f_sid,
-        open(tox_file, "w", newline="", encoding="utf-8") as f_tox,
-        open(syn_file, "w", newline="", encoding="utf-8") as f_syn,
-        open(log_file, "w", newline="", encoding="utf-8") as f_log,
+        open(sid_file, "a", newline="", encoding="utf-8") as f_sid,
+        open(tox_file, "a", newline="", encoding="utf-8") as f_tox,
+        open(syn_file, "a", newline="", encoding="utf-8") as f_syn,
+        open(log_file, "a", newline="", encoding="utf-8") as f_log,
     ):
         w_sid = csv.DictWriter(f_sid, fieldnames=sid_fields)
         w_tox = csv.DictWriter(f_tox, fieldnames=tox_fields)
         w_syn = csv.DictWriter(f_syn, fieldnames=syn_fields)
         w_log = csv.DictWriter(f_log, fieldnames=log_fields)
-        w_sid.writeheader()
-        w_tox.writeheader()
-        w_syn.writeheader()
-        w_log.writeheader()
+        
+        if not sid_exists:
+            w_sid.writeheader()
+        if not tox_exists:
+            w_tox.writeheader()
+        if not syn_exists:
+            w_syn.writeheader()
+        if not log_exists:
+            w_log.writeheader()
 
         total = len(compounds_data)
         for idx, item in enumerate(compounds_data, 1):
             compound = item["name"]
             given_sids = item.get("sids")
+
+            if compound.lower() in processed_names:
+                print(f"\n[{idx}/{total}] Skipping '{compound}' (already processed)")
+                skipped += 1
+                continue
 
             print(f"\n{'='*60}")
             print(f"[{idx}/{total}] {compound}")
@@ -590,6 +654,17 @@ def run_batch(outdir: str, compounds_data: list = None):
             # ----- Step 2: Find the SID with a RefChem synonym -----
             print(f"  → Scanning SIDs for RefChem ID …")
             sid, refchem_id, _, fallback_sid, fallback_synonyms = find_refchem_sid(sids)
+
+            if sid is not None and sid in processed_sids:
+                print(f"    ✓ Skipping SID={sid} (already processed from another name)")
+                processed_names.add(compound.lower())
+                skipped += 1
+                continue
+            elif sid is None and fallback_sid is not None and fallback_sid in processed_sids:
+                print(f"    ✓ Skipping fallback SID={fallback_sid} (already processed from another name)")
+                processed_names.add(compound.lower())
+                skipped += 1
+                continue
 
             if sid is None or refchem_id is None:
                 if fallback_sid is not None:
@@ -651,7 +726,7 @@ def run_batch(outdir: str, compounds_data: list = None):
             max_phase = fetch_chembl_max_phase(chembl_id)
 
             record_title = result["record_title"]
-            hepatotox = result["hepatotox_score"]
+            hepatotox_score, hepatotox_reasoning, hepatotox_url = result.get("hepatotox_data", (None, None, None))
             dili_rows = result["dili_rows"]
             synonyms = result["synonyms"]
 
@@ -659,7 +734,7 @@ def run_batch(outdir: str, compounds_data: list = None):
             print(f"    ChEMBL max_phase    : {max_phase}")
             print(f"    Synonyms            : {len(synonyms)}")
             print(f"    DILI dataset entries : {len(dili_rows)}")
-            print(f"    Hepatotox score     : {hepatotox}")
+            print(f"    Hepatotox score     : {hepatotox_score}")
 
             # ----- Write substance_out row -----
             w_sid.writerow({
@@ -677,20 +752,22 @@ def run_batch(outdir: str, compounds_data: list = None):
                         "sid": sid,
                         "dili_severity_grade": row["dili_severity_grade"],
                         "dili_annotation": row["dili_annotation"],
-                        "hepatotoxicity_likelihood_score": hepatotox,
+                        "hepatotoxicity_likelihood_score": None,
+                        "hepatotoxicity_likelihood_score_reasoning": None,
                         "reference_number": row["reference_number"],
-                        "dili_dataset": row["dili_dataset"],
-                        "dili_source_url": row["dili_source_url"],
+                        "tox_dataset": row["tox_dataset"],
+                        "tox_source_url": row["tox_source_url"],
                     })
-            else:
+            if hepatotox_score:
                 w_tox.writerow({
                     "sid": sid,
                     "dili_severity_grade": None,
                     "dili_annotation": None,
-                    "hepatotoxicity_likelihood_score": hepatotox,
+                    "hepatotoxicity_likelihood_score": hepatotox_score,
+                    "hepatotoxicity_likelihood_score_reasoning": hepatotox_reasoning,
                     "reference_number": None,
-                    "dili_dataset": None,
-                    "dili_source_url": None,
+                    "tox_dataset": "Livertox",
+                    "tox_source_url": hepatotox_url,
                 })
 
             # ----- Write synonym rows -----
@@ -704,6 +781,8 @@ def run_batch(outdir: str, compounds_data: list = None):
                 "refchem_id": refchem_id, "error": "",
             })
             success += 1
+            processed_names.add(compound.lower())
+            processed_sids.add(sid)
 
             # Flush after each compound so partial results are saved
             f_sid.flush()
@@ -712,7 +791,7 @@ def run_batch(outdir: str, compounds_data: list = None):
             f_log.flush()
 
     print(f"\n{'='*60}")
-    print(f"BATCH COMPLETE: {success} succeeded, {failed} failed out of {total}")
+    print(f"BATCH COMPLETE: {success} succeeded, {skipped} skipped, {failed} failed out of {total}")
     print(f"{'='*60}")
     print(f"  ✓ substance_out.csv       → {sid_file}")
     print(f"  ✓ substance_toxicity.csv      → {tox_file}")
