@@ -67,6 +67,7 @@ class Compounds(Base):
     chembl_max_phase: Mapped[int] = mapped_column(Integer)
     drug_like: Mapped[bool] = mapped_column(Boolean)
     fda_approval: Mapped[bool] = mapped_column(Boolean)
+    atc_code: Mapped[str] = mapped_column(String(7), nullable=True)
     date_added: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -79,6 +80,13 @@ class Compounds(Base):
     mechanisms: Mapped[list["ChemblMechanism"]] = relationship(
         "ChemblMechanism",
         primaryjoin="Compounds.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
+        back_populates="compound",
+        lazy="noload",
+    )
+
+    drug_indications: Mapped[list["ChemblDrugIndication"]] = relationship(
+        "ChemblDrugIndication",
+        primaryjoin="Compounds.molecule_chembl_id == foreign(ChemblDrugIndication.molecule_chembl_id)",
         back_populates="compound",
         lazy="noload",
     )
@@ -169,11 +177,11 @@ class BioAssays(Base):
     source_name: Mapped[str] = mapped_column(String(255))
     source_id: Mapped[str] = mapped_column(String(255))
     description_combined: Mapped[str] = mapped_column(Text)
-    protocol_combined: Mapped[str] = mapped_column(Text)
-    comment_combined: Mapped[str] = mapped_column(Text)
-    activity_outcome_method: Mapped[int] = mapped_column(Integer)
-    target_name: Mapped[str] = mapped_column(Text)
-    target_protein_accession: Mapped[str] = mapped_column(Text)
+    protocol_combined: Mapped[str] = mapped_column(Text, nullable=True)
+    comment_combined: Mapped[str] = mapped_column(Text, nullable=True)
+    activity_outcome_method: Mapped[int] = mapped_column(Integer, nullable=True)
+    target_name: Mapped[str] = mapped_column(Text, nullable=True)
+    target_protein_accession: Mapped[str] = mapped_column(Text, nullable=True)
 
     compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
         "CompoundBioAssays",
@@ -295,6 +303,14 @@ class Substances(Base):
         lazy="noload",
     )
 
+    drug_indications: Mapped[list["ChemblDrugIndication"]] = relationship(
+        "ChemblDrugIndication",
+        primaryjoin="Substances.molecule_chembl_id == foreign(ChemblDrugIndication.molecule_chembl_id)",
+        back_populates="substance",
+        lazy="noload",
+    )
+
+
     toxicity: Mapped[list["SubstanceToxicity"]] = relationship(
         "SubstanceToxicity",
         back_populates="substance",
@@ -393,86 +409,169 @@ class ChemblMechanism(Base):
         back_populates="mechanisms",
     )
 
+
+class ChemblDrugIndication(Base):
+    __tablename__ = "chembl_drug_indication"
+
+    molecule_chembl_id: Mapped[str] = mapped_column(
+        String(200),
+        primary_key=True,
+    )
+    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    drugind_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    max_phase_for_ind: Mapped[str] = mapped_column(String(50), nullable=True)
+    mesh_id: Mapped[str] = mapped_column(String(50))
+    mesh_heading: Mapped[str] = mapped_column(String(200))
+    efo_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    efo_term: Mapped[str] = mapped_column(String(200), nullable=True)
+    clinical_trials_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    daily_med_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    ema_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    fda_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    usan_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    inn_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    inferred_from_parent: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        primaryjoin="foreign(ChemblDrugIndication.molecule_chembl_id) == Compounds.molecule_chembl_id",
+        back_populates="drug_indications",
+    )
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        primaryjoin="foreign(ChemblDrugIndication.molecule_chembl_id) == Substances.molecule_chembl_id",
+        back_populates="drug_indications",
+    )
+
+
 class AntibodyDrugConjugates(Base):
     __tablename__ = "antibody_drug_conjugates"
 
+    # Core ADC Required Identifiers (always present)
     adc_id: Mapped[str] = mapped_column(String(50), primary_key=True)
     adc_drug_name: Mapped[str] = mapped_column(String(255))
     adc_name: Mapped[str] = mapped_column(String(255))
-    adc_brand_name: Mapped[str] = mapped_column(String(255))
     adc_phase: Mapped[str] = mapped_column(String(50))
     adc_drug_status: Mapped[str] = mapped_column(String(255))
     adc_detail_url: Mapped[str] = mapped_column(String(255))
-    adc_synonyms: Mapped[str] = mapped_column(Text())
-    adc_organization: Mapped[str] = mapped_column(Text())
-    adc_drug_to_antibody_ratio: Mapped[str] = mapped_column(String(50))
-    adc_structure: Mapped[str] = mapped_column(Text())
-    adc_therapeutic_target: Mapped[str] = mapped_column(String(255))
-    adc_conjugate_type: Mapped[str] = mapped_column(String(255))
-    adc_combination_type: Mapped[str] = mapped_column(String(255))
-    adc_special_approvals: Mapped[str] = mapped_column(Text())
+
+    adc_brand_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    adc_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_organization: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_drug_to_antibody_ratio: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_therapeutic_target: Mapped[str] = mapped_column(String(255), nullable=True)
+    adc_conjugate_type: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_combination_type: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_special_approvals: Mapped[str] = mapped_column(Text(), nullable=True)
     adc_pubchem_sid: Mapped[int] = mapped_column(Integer, nullable=True)
-    adc_drugbank_id: Mapped[str] = mapped_column(String(50))
-    adc_chembl_id: Mapped[str] = mapped_column(String(50))
-    adc_absorption: Mapped[str] = mapped_column(Text())
-    adc_distribution: Mapped[str] = mapped_column(Text())
-    adc_metabolism: Mapped[str] = mapped_column(Text())
-    adc_elimination: Mapped[str] = mapped_column(Text())
-    adc_toxicity: Mapped[str] = mapped_column(Text())
-    adc_drugmap_id: Mapped[str] = mapped_column(String(50))
-    adc_ttd_id: Mapped[str] = mapped_column(String(50))
-    adc_dresis_id: Mapped[str] = mapped_column(String(50))
+    adc_drugbank_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_chembl_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_drugmap_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_ttd_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_dresis_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_chebi_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_absorption: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_distribution: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_metabolism: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_elimination: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_toxicity: Mapped[str] = mapped_column(Text(), nullable=True)
 
-    antibody_id: Mapped[str] = mapped_column(String(50))
     antibody_name: Mapped[str] = mapped_column(String(255))
-    antibody_organization: Mapped[str] = mapped_column(Text())
-    antibody_indication: Mapped[str] = mapped_column(Text())
-    antibody_synonyms: Mapped[str] = mapped_column(Text())
-    antibody_type: Mapped[str] = mapped_column(String(100))
-    antibody_subtype: Mapped[str] = mapped_column(String(100))
-    antibody_antigen_name: Mapped[str] = mapped_column(String(255))
-    antibody_chembl_id: Mapped[str] = mapped_column(String(50))
-    antibody_heavy_chain_sequence: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_variable_domain: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_constant_domain_1: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_constant_domain_2: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_constant_domain_3: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_hinge_region: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_cdr_1: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_cdr_2: Mapped[str] = mapped_column(Text())
-    antibody_heavy_chain_cdr_3: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_sequence: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_variable_domain: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_constant_domain: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_cdr_1: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_cdr_2: Mapped[str] = mapped_column(Text())
-    antibody_light_chain_cdr_3: Mapped[str] = mapped_column(Text())
+    antibody_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_organization: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_indication: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    antibody_subtype: Mapped[str] = mapped_column(String(100), nullable=True)
+    antibody_antigen_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antibody_chembl_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_drugbank_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_drug_central_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_pdb_id: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_approval_date: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_brand_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antibody_heavy_chain_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_variable_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_3: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_hinge_region: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_3: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_variable_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_constant_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_3: Mapped[str] = mapped_column(Text(), nullable=True)
 
-    payload_id: Mapped[str] = mapped_column(String(50))
-    payload_name: Mapped[str] = mapped_column(String(255))
-    payload_synonyms: Mapped[str] = mapped_column(Text())
-    payload_targets: Mapped[str] = mapped_column(Text())
-    payload_structure: Mapped[str] = mapped_column(Text())
-    payload_formula: Mapped[str] = mapped_column(String(255))
-    payload_isosmiles: Mapped[str] = mapped_column(Text())
+    payload_name: Mapped[str] = mapped_column(String(300))
+    payload_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    payload_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_targets: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_formula: Mapped[str] = mapped_column(String(255), nullable=True)
+    payload_isosmiles: Mapped[str] = mapped_column(Text(), nullable=True)
     payload_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
-    payload_inchi: Mapped[str] = mapped_column(Text())
-    payload_inchikey: Mapped[str] = mapped_column(String(255))
-    payload_iupac_name: Mapped[str] = mapped_column(Text())
-    payload_pharmaceutical_properties: Mapped[str] = mapped_column(Text())
+    payload_inchi: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_inchikey: Mapped[str] = mapped_column(String(255), nullable=True)
+    payload_iupac_name: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_pharmaceutical_properties: Mapped[str] = mapped_column(Text(), nullable=True)
 
-    linker_id: Mapped[str] = mapped_column(String(50))
     linker_name: Mapped[str] = mapped_column(String(255))
-    linker_type: Mapped[str] = mapped_column(String(255))
-    linker_antibody_linker_relation: Mapped[str] = mapped_column(String(255))
-    linker_structure: Mapped[str] = mapped_column(Text())
-    linker_formula: Mapped[str] = mapped_column(String(255))
-    linker_isosmiles: Mapped[str] = mapped_column(Text())
+    linker_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    linker_type: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_antibody_linker_relation: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_formula: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_isosmiles: Mapped[str] = mapped_column(Text(), nullable=True)
     linker_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
-    linker_inchi: Mapped[str] = mapped_column(Text())
-    linker_inchikey: Mapped[str] = mapped_column(String(255))
-    linker_iupac_name: Mapped[str] = mapped_column(Text())
-    linker_pharmaceutical_properties: Mapped[str] = mapped_column(Text())
+    linker_inchi: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_inchikey: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_iupac_name: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_pharmaceutical_properties: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    antigen_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antigen_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_gene_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    antigen_gene_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antigen_uniprot_entry: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_hgnc_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_kegg_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_family: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_function: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_synonym: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    target_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    target_gene_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    target_gene_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_uniprot_entry: Mapped[str] = mapped_column(String(255), nullable=True)
+    target_hgnc_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_kegg_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_family: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_function: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_synonym: Mapped[str] = mapped_column(Text(), nullable=True)
+
+
+class AdcIndications(Base):
+    __tablename__ = "adc_indications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    adc_id: Mapped[str] = mapped_column(String(50), ForeignKey("antibody_drug_conjugates.adc_id"))
+    name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(100))
+    trial_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    document: Mapped[str] = mapped_column(String(100), nullable=True)
+    link: Mapped[str] = mapped_column(Text(), nullable=True)
+
+
+
 
 
 
@@ -647,3 +746,10 @@ class OncoTree(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+class ATCCodes(Base):
+    __tablename__ = "atc_codes"
+
+    code: Mapped[str] = mapped_column(String(7), primary_key=True)
+    description: Mapped[str] = mapped_column(Text())
+

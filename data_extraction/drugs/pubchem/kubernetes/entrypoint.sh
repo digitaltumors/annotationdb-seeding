@@ -45,6 +45,10 @@ gsutil -q cp "${BUCKET}/reference/completed_aids.txt" "$WORK_DIR/completed_aids.
 gsutil -q cp "${BUCKET}/output/union_out.csv" "$WORK_DIR/master_union_out.csv" 2>/dev/null || \
     echo "WARNING: master_union_out.csv not found in GCS, properties will be scraped"
 
+# master_union_bioassays.csv — needed by pubchem_drug_extraction to skip saving existing bioassay mappings
+gsutil -q cp "${BUCKET}/output/union_bioassays.csv" "$WORK_DIR/master_union_bioassays.csv" 2>/dev/null || \
+    echo "WARNING: master_union_bioassays.csv not found in GCS, all valid bioassays will be saved"
+
 # ---- Step 1: PubChem drug extraction (properties, synonyms, bioassays) ----
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Running pubchem_drug_extraction_from_input_ids.R ..."
 cd "$WORK_DIR"

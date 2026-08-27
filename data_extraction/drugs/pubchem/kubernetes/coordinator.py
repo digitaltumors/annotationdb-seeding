@@ -26,14 +26,15 @@ from pathlib import Path
 # Configuration
 # ============================================================================
 BUCKET = "gs://annotationdb_data_retrieval"
-DEFAULT_INPUT_CSV = f"{BUCKET}/input/arpa-overlap-2.csv"
+DEFAULT_INPUT_CSV = f"{BUCKET}/input/TOX21_needed.csv"
 OUTPUT_PREFIX = f"{BUCKET}/output"
 BATCHES_PREFIX = f"{BUCKET}/batches"
 
 # Files to check for completed IDs
 UNION_OUT = f"{OUTPUT_PREFIX}/union_out.csv"
+UNION_BIOASSAYS = f"{OUTPUT_PREFIX}/union_bioassays.csv"
 FAILED_INPUT_IDS = f"{OUTPUT_PREFIX}/failed_input_ids.csv"
-TOXICITY_OUTPUT = f"{OUTPUT_PREFIX}/toxicity_output.csv"
+TOXICITY_OUTPUT = f"{OUTPUT_PREFIX}/toxicity_output_new.csv"
 ASSAY_FIELDS_OUTPUT = f"{OUTPUT_PREFIX}/union_pubchem_assay_fields.csv"
 COMPLETED_AIDS_REF = f"{BUCKET}/reference/completed_aids.txt"
 
@@ -98,9 +99,9 @@ def detect_columns(fieldnames: list[str]) -> tuple[str, str | None]:
     return input_id_col, inchikey_col
 
 
-def get_done_ids_from_union_out(csv_text: str | None, tox_text: str | None) -> tuple[set[str], set[str], set[str]]:
+def get_done_ids_from_union_out(csv_text: str | None, tox_text: str | None, bio_text: str | None) -> tuple[set[str], set[str], set[str]]:
     """Extract completed input_ids, cids, and inchikeys from union_out.csv,
-    cross-referenced with toxicity_output.csv for true completion."""
+    cross-referenced with toxicity_output.csv and union_bioassays.csv for true completion."""
     done_inputs = set()
     done_cids = set()
     done_inchikeys = set()
@@ -118,6 +119,14 @@ def get_done_ids_from_union_out(csv_text: str | None, tox_text: str | None) -> t
             finished_cids = {row["pubchem_cid"].strip() for row in tox_reader
                            if row.get("pubchem_cid", "").strip()}
 
+    # Get finished CIDs from bioassays
+    finished_bio_cids = None
+    if bio_text is not None:
+        bio_reader = csv.DictReader(io.StringIO(bio_text))
+        if "pubchem_cid" in (bio_reader.fieldnames or []):
+            finished_bio_cids = {row["pubchem_cid"].strip() for row in bio_reader
+                               if row.get("pubchem_cid", "").strip()}
+
     for row in reader:
         cid = row.get("cid", "").strip()
         inchikey = row.get("inchikey", "").strip()
@@ -125,6 +134,10 @@ def get_done_ids_from_union_out(csv_text: str | None, tox_text: str | None) -> t
 
         # If we have toxicity data, only count CIDs that are in toxicity as complete
         if finished_cids is not None and cid not in finished_cids:
+            continue
+            
+        # If we have bioassay data, only count CIDs that are in bioassays as complete
+        if finished_bio_cids is not None and cid not in finished_bio_cids:
             continue
             
         if cid:
@@ -236,6 +249,7 @@ def main():
     print("[coordinator] Checking existing progress in GCS ...")
     union_text = gsutil_cat(UNION_OUT)
     tox_text = gsutil_cat(TOXICITY_OUTPUT)
+    bio_text = gsutil_cat(UNION_BIOASSAYS)
     failed_text = gsutil_cat(FAILED_INPUT_IDS)
 
     # Detect cid column for the master CSV
@@ -317,7 +331,7 @@ def main():
             else:
                 print("[coordinator] No new overlapping names to merge into existing cache.")
 
-    done_inputs, done_cids, done_inchikeys = get_done_ids_from_union_out(union_text, tox_text)
+    done_inputs, done_cids, done_inchikeys = get_done_ids_from_union_out(union_text, tox_text, bio_text)
     done_from_failed = get_done_ids_from_failed(failed_text)
 
     # ---- Compute remaining ----

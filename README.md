@@ -68,6 +68,8 @@ gcloud container clusters create annotationdb-extraction \
   --zone northamerica-northeast2-a \
   --num-nodes 4 \
   --machine-type e2-standard-2 \
+  --network default \
+  --subnetwork default \
   --service-account annotationdb-scraping@annotationdb.iam.gserviceaccount.com
 
 
@@ -89,8 +91,33 @@ docker buildx build --platform linux/amd64 -t bhklabmattbocc/annotationdb-r:v9 -
 # 3. Deploy the Job to GKE
 kubectl apply -f job.yaml
 
+# 3. alternative: deploy job locally
+
+docker run --rm \
+  -v ~/.config/gcloud:/root/.config/gcloud \
+  bhklabmattbocc/annotationdb-r:v14 0
+
+
 # 4. After the Job completes, merge all parallel batch outputs into the master files
 python merge_outputs.py
+
+
+# 5. Delete job once it has been completed
+kubectl delete -f job.yaml
+
+```
+
+```bash
+
+# Tracking all pod status
+kubectl get pods -l app=annotationdb-extract -w
+
+# Tracking a single pod progress
+kubectl logs -f {pod_id}
+
+# Tracking job progress across all pods
+kubectl logs -f -l app=annotationdb-extract
+
 ```
 
 ## Database Seeding

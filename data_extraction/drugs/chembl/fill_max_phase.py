@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 
-INPUT_CSV = "seeding/seeding_data/jun_23_2026/union_out.csv"
+INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/july_30_2026/union_out.csv"
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
 
 print(f"Loading {INPUT_CSV}...")
@@ -18,7 +18,7 @@ missing_phases = df.loc[mask, 'molecule_chembl_id'].unique().tolist()
 if not missing_phases:
     print("No missing max_phases found for the mapped ChEMBL IDs.")
 else:
-    print(f"Found {len(missing_phases)} ChEMBL IDs missing max_phase. Querying local SQLite DB...")
+    print(f"Found {len(missing_phases)} ChEMBL IDs missing max_phase. Querying local SQLite DB")
     
     conn = sqlite3.connect(DB_PATH)
     

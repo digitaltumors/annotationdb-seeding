@@ -62,7 +62,7 @@ def parse_args():
         required=True,
         help="Directory containing the extraction output CSVs "
              "(union_out.csv, union_synonyms.csv, union_bioassays.csv, "
-             "union_pubchem_assay_fields.csv, toxicity_output.csv)",
+             "union_pubchem_assay_fields.csv, toxicity_output_new.csv)",
     )
     p.add_argument(
         "--chembl_mech",
@@ -170,7 +170,7 @@ def main():
     synonyms_df     = load_csv(data_dir / "union_synonyms.csv",            "synonyms")
     bioassays_df    = load_csv(data_dir / "union_pubchem_assay_fields.csv","bioassays")
     cb_df           = load_csv(data_dir / "union_bioassays.csv",           "compound_bioassays")
-    toxicity_df     = load_csv(data_dir / "toxicity_output.csv",           "toxicity")
+    toxicity_df     = load_csv(data_dir / "toxicity_output_new.csv",       "toxicity")
 
     chembl_path = Path(args.chembl_mech) if args.chembl_mech else None
     chembl_df = load_csv(chembl_path, "chembl_mechanism") if chembl_path else None
