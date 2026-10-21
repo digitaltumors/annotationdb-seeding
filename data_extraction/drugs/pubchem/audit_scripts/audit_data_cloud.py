@@ -19,7 +19,7 @@ TMPDIR = Path(tempfile.mkdtemp(prefix="audit_cloud_"))
 GCS_FILES = {
     "union_out":                  f"{BUCKET}/output/union_out.csv",
     "union_synonyms":             f"{BUCKET}/output/union_synonyms.csv",
-    "toxicity_output":            f"{BUCKET}/output/toxicity_output.csv",
+    "toxicity_output":            f"{BUCKET}/output/toxicity_output_new.csv",
     "union_bioassays":            f"{BUCKET}/output/union_bioassays.csv",
     "union_pubchem_assay_fields": f"{BUCKET}/output/union_pubchem_assay_fields.csv",
 }

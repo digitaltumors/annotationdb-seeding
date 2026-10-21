@@ -1,7 +1,7 @@
 """
 Cleanup script to purge rows with broken foreign key references. Backs up original files with a .bak extension before overwriting.
 Files Processed:
-  - toxicity_output.csv (invalid pubchem_cid)
+  - toxicity_output_new.csv (invalid pubchem_cid)
   - union_bioassays.csv (invalid pubchem_cid or bioassay_aid)
   - chembl_mechanism.csv (invalid molecule_chembl_id)
 """
@@ -53,8 +53,8 @@ def clean_file(src: Path, key_cols: list[str], keep_predicate):
     tmp.replace(src)
     print(f"{src.name}: {total_in:,} rows in to {total_out:,} rows out ({total_in - total_out:,} removed)")
 
-# 1. toxicity_output.csv – keep rows where pubchem_cid exists in union_out
-toxicity_path = BASE / "toxicity_output.csv"
+# 1. toxicity_output_new.csv – keep rows where pubchem_cid exists in union_out
+toxicity_path = BASE / "toxicity_output_new.csv"
 clean_file(
     toxicity_path,
     ["pubchem_cid"],

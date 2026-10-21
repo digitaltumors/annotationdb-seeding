@@ -33,7 +33,7 @@ LOCAL_FILES = {
     "union_out":                  LOCAL_OUTPUT_DIR / "union_out.csv",
     "chembl_mechanism":             LOCAL_OUTPUT_DIR / "chembl_mechanism.csv",
     "union_synonyms":             LOCAL_OUTPUT_DIR / "union_synonyms.csv",
-    "toxicity_output":            LOCAL_OUTPUT_DIR / "toxicity_output.csv",
+    "toxicity_output":            LOCAL_OUTPUT_DIR / "toxicity_output_new.csv",
     "union_bioassays":            LOCAL_OUTPUT_DIR / "union_bioassays.csv",
     "union_pubchem_assay_fields": LOCAL_OUTPUT_DIR / "union_pubchem_assay_fields.csv",
 }
