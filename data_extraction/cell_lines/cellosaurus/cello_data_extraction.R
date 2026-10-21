@@ -2,10 +2,30 @@ library(AnnotationGx)
 library(data.table)
 library(jsonlite)
 
-# Import drug list
+# Import full accession list
 cell_lines_file <- read.csv("input_data/cellosaurus_ids.csv")
-cell_lines <- cell_lines_file$cellosaurus_id
+all_cell_lines <- cell_lines_file$cellosaurus_id
 
+# Exclude accessions already extracted in previous runs
+existing_output <- "output_data/cell_line_table.csv"
+if (file.exists(existing_output)) {
+    existing_data <- read.csv(existing_output)
+    already_extracted <- existing_data$accession
+    cell_lines <- setdiff(all_cell_lines, already_extracted)
+    cat(sprintf(
+        "Skipping %d already-extracted accessions, querying %d new ones\n",
+        length(all_cell_lines) - length(cell_lines),
+        length(cell_lines)
+    ))
+} else {
+    cell_lines <- all_cell_lines
+    cat(sprintf("No prior output found, querying all %d accessions\n", length(cell_lines)))
+}
+
+if (length(cell_lines) == 0) {
+    cat("All accessions already extracted. Nothing to do.\n")
+    quit(save = "no")
+}
 
 # Map cell line anmes to cellosaurus accession id, remove NA's
 # result <- mapCell2Accession(cell_lines, parsed = TRUE)
@@ -139,11 +159,25 @@ if (nrow(syn_dt)) {
 # --- END NEW ---
 
 
+# Append to existing cell_line_table.csv if present
+if (file.exists("output_data/cell_line_table.csv")) {
+    existing_table <- read.csv("output_data/cell_line_table.csv", row.names = 1)
+    field_data_flat <- rbind(existing_table, field_data_flat)
+    if ("accession" %in% names(field_data_flat)) {
+        field_data_flat <- field_data_flat[!duplicated(field_data_flat$accession), , drop = FALSE]
+    }
+}
 write.csv(field_data_flat, "output_data/cell_line_table.csv", row.names = TRUE)
 
 # match DB FK/PK column name
 if ("accession" %in% names(syn_dt)) {
   data.table::setnames(syn_dt, "accession", "cellosaurus_accession")
+}
+# Append to existing cell_line_synonyms.csv if present
+if (file.exists("output_data/cell_line_synonyms.csv")) {
+    existing_syn <- fread("output_data/cell_line_synonyms.csv")
+    syn_dt <- rbindlist(list(existing_syn, syn_dt), use.names = TRUE, fill = TRUE)
+    syn_dt <- unique(syn_dt, by = c("cellosaurus_accession", "synonym"))
 }
 write.csv(as.data.frame(syn_dt), "output_data/cell_line_synonyms.csv", row.names = FALSE)
 
@@ -202,6 +236,12 @@ if (!is.null(dis_dt) && nrow(dis_dt) > 0L) {
 # match DB FK/PK column name
 if ("accession" %in% names(dis_dt)) {
   data.table::setnames(dis_dt, "accession", "cellosaurus_accession")
+}
+# Append to existing cell_line_diseases.csv if present
+if (file.exists("output_data/cell_line_diseases.csv")) {
+    existing_dis <- fread("output_data/cell_line_diseases.csv")
+    dis_dt <- rbindlist(list(existing_dis, dis_dt), use.names = TRUE, fill = TRUE)
+    dis_dt <- unique(dis_dt, by = c("cellosaurus_accession", "source", "id"))
 }
 write.csv(as.data.frame(dis_dt), "output_data/cell_line_diseases.csv", row.names = FALSE)
 # --- end diseases export ---
