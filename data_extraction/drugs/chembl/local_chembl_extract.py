@@ -5,11 +5,16 @@ import re
 import os
 
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
-# INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/substance/output/adcs/substance_out.csv"
-# OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/data_extraction/drugs/pubchem/substance/output/adcs"
-INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/july_30_2026/union_out.csv"
-OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/july_30_2026"
-OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_mechanism.csv")
+import argparse
+
+parser = argparse.ArgumentParser(description="Extract ChEMBL mechanisms for a given input CSV")
+parser.add_argument("--input", default="/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/aug_27_2026/union_out.csv", help="Input CSV containing compound IDs")
+parser.add_argument("--output", default="/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/aug_27_2026/chembl_mechanism.csv", help="Output CSV path")
+args = parser.parse_args()
+
+INPUT_CSV = args.input
+OUTPUT_CSV = args.output
+OUTPUT_DIR = os.path.dirname(OUTPUT_CSV)
 
 print(f"Connecting to SQLite Database: {DB_PATH}...")
 conn = sqlite3.connect(DB_PATH)
@@ -116,6 +121,8 @@ def build_variant_sequence_json(row):
 
 mech_df['variant_sequence'] = mech_df.apply(build_variant_sequence_json, axis=1)
 mech_df['inferred_from_parent'] = False
+mech_df['inferred_from_child'] = False
+mech_df['child_molecule_chembl_id'] = None
 
 # ── Bidirectional parent-child remap ─────────────────────────────────────────
 print("Building parent-child remap table...")
@@ -125,21 +132,35 @@ hier_pairs = (
     .query("molecule_chembl_id != parent_molecule_chembl_id")
     .drop_duplicates()
 )
-remap_1 = hier_pairs.rename(columns={'molecule_chembl_id': 'from_id', 'parent_molecule_chembl_id': 'to_id'})
-remap_2 = hier_pairs.rename(columns={'parent_molecule_chembl_id': 'from_id', 'molecule_chembl_id': 'to_id'})
-remap_df = pd.concat([remap_1, remap_2]).drop_duplicates()
+# remap_child_to_parent: child's annotations → parent (parent receives child's data)
+remap_child_to_parent = hier_pairs.rename(columns={'molecule_chembl_id': 'from_id', 'parent_molecule_chembl_id': 'to_id'})
+# remap_parent_to_child: parent's annotations → child (child receives parent's data)
+remap_parent_to_child = hier_pairs.rename(columns={'parent_molecule_chembl_id': 'from_id', 'molecule_chembl_id': 'to_id'})
 
-def apply_remap(df, remap_df):
+def apply_remap_child_to_parent(df, remap_df):
+    """Child's annotations mapped to parent. Sets inferred_from_child=True, child_molecule_chembl_id=source child."""
+    remapped = df.merge(remap_df, left_on='molecule_chembl_id', right_on='from_id', how='inner')
+    remapped['child_molecule_chembl_id'] = remapped['from_id']  # Track which child it came from
+    remapped['molecule_chembl_id'] = remapped['to_id']
+    remapped['inferred_from_child'] = True
+    remapped['inferred_from_parent'] = False
+    remapped.drop(columns=['from_id', 'to_id'], inplace=True)
+    return remapped
+
+def apply_remap_parent_to_child(df, remap_df):
+    """Parent's annotations mapped to child. Sets inferred_from_parent=True."""
     remapped = df.merge(remap_df, left_on='molecule_chembl_id', right_on='from_id', how='inner')
     remapped['molecule_chembl_id'] = remapped['to_id']
-    # It should only be inferred if the new ID is NOT the parent ID
-    remapped['inferred_from_parent'] = remapped['molecule_chembl_id'] != remapped['parent_molecule_chembl_id']
+    remapped['inferred_from_parent'] = True
+    remapped['inferred_from_child'] = False
+    remapped['child_molecule_chembl_id'] = None
     remapped.drop(columns=['from_id', 'to_id'], inplace=True)
     return remapped
 
 print(f"Remapping drug_mechanism ({len(mech_df):,} rows) via hierarchy...")
-mech_remapped = apply_remap(mech_df, remap_df)
-all_mech_df = pd.concat([mech_df, mech_remapped]).drop_duplicates(subset=['molecule_chembl_id', 'mec_id'])
+mech_from_child = apply_remap_child_to_parent(mech_df, remap_child_to_parent)
+mech_from_parent = apply_remap_parent_to_child(mech_df, remap_parent_to_child)
+all_mech_df = pd.concat([mech_df, mech_from_child, mech_from_parent]).drop_duplicates(subset=['molecule_chembl_id', 'mec_id'])
 
 
 # ── Combine both sources ──────────────────────────────────────────────────────
@@ -210,6 +231,8 @@ ANNOTATIONGX_COL_ORDER = [
     'activity_id',
     'source',
     'inferred_from_parent',
+    'inferred_from_child',
+    'child_molecule_chembl_id',
 ]
 # Only keep columns that exist in the dataframe (safety)
 col_order = [c for c in ANNOTATIONGX_COL_ORDER if c in final_mech_df.columns]

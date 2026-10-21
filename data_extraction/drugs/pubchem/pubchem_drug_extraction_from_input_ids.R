@@ -800,7 +800,7 @@ if (length(run_cids) > 0) {
 # ---------------------------
 # AID PORTION
 # ---------------------------
-fetch_bioassay_summary_one <- function(cid, tries = 2, base_wait = 0.25) {
+fetch_bioassay_summary_one <- function(cid, tries = 4, base_wait = 0.5) {
     cid_chr <- as.character(cid)
     url <- sprintf("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/%s/assaysummary/JSON", cid_chr)
 
@@ -813,13 +813,21 @@ fetch_bioassay_summary_one <- function(cid, tries = 2, base_wait = 0.25) {
 
         if (inherits(resp, "try-error")) {
             if (i < tries) {
-                Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.1))
+                Sys.sleep(base_wait * (1.5^(i - 1)) + runif(1, 0, 0.2))
                 next
             }
             return(data.table())
         }
 
-        if (httr::status_code(resp) != 200) next
+        status <- httr::status_code(resp)
+        if (status == 429 || status >= 500) {
+            if (i < tries) {
+                # Exponential backoff on rate limits or server busy errors (HTTP 429 / 503)
+                Sys.sleep((base_wait * (2^(i - 1))) + runif(1, 0.5, 1.5))
+                next
+            }
+        }
+        if (status != 200) return(data.table())
 
         txt <- httr::content(resp, as = "text", encoding = "UTF-8")
         j <- try(jsonlite::fromJSON(txt, simplifyVector = FALSE), silent = TRUE)
@@ -859,6 +867,10 @@ fetch_bioassay_summary_one <- function(cid, tries = 2, base_wait = 0.25) {
 
         out <- out[!is.na(bioassay_aid) & nzchar(bioassay_aid)]
         out <- unique(out)
+
+        # Micro-staggering to break up concurrent request bursts across parallel pods
+        Sys.sleep(runif(1, 0.15, 0.35))
+
         return(out)
     }
 
@@ -917,6 +929,19 @@ if (nrow(bio_all)) {
     bio_all[, key := paste0(pubchem_cid, "::", bioassay_aid)]
     bio_all <- bio_all[!duplicated(key)][, key := NULL]
     bio_all <- bio_all[, .(pubchem_cid, bioassay_aid)]
+
+    # Check against master/existing union_bioassays.csv to only keep genuinely new (CID, AID) pairs
+    existing_bio_path <- if (file.exists("/tmp/work/master_union_bioassays.csv")) "/tmp/work/master_union_bioassays.csv" else if (file.exists(union_bioassays_path)) union_bioassays_path else NULL
+    if (!is.null(existing_bio_path)) {
+        tmp_bio <- tryCatch(fread(existing_bio_path, select = c("pubchem_cid", "bioassay_aid"), colClasses = "character"), error = function(e) NULL)
+        if (!is.null(tmp_bio) && nrow(tmp_bio) > 0) {
+            before_n <- nrow(bio_all)
+            tmp_bio[, bio_key := paste0(pubchem_cid, "::", bioassay_aid)]
+            bio_all[, bio_key := paste0(pubchem_cid, "::", bioassay_aid)]
+            bio_all <- bio_all[!bio_key %in% tmp_bio$bio_key][, bio_key := NULL]
+            printf("[%s] Filtered against existing bioassays in %s: %d -> %d new rows to append", ts(), basename(existing_bio_path), before_n, nrow(bio_all))
+        }
+    }
 }
 
 # Append to union_bioassays.csv (aligned)

@@ -4,9 +4,16 @@ import re
 import os
 
 DB_PATH = "/Users/mattbocc/Downloads/chembl_36/chembl_36_sqlite/chembl_36.db"
-INPUT_CSV = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/july_30_2026/union_out.csv"
-OUTPUT_DIR = "/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/july_30_2026"
-OUTPUT_CSV = os.path.join(OUTPUT_DIR, "chembl_drug_indication.csv")
+import argparse
+
+parser = argparse.ArgumentParser(description="Extract ChEMBL indications for a given input CSV")
+parser.add_argument("--input", default="/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/aug_27_2026/union_out.csv", help="Input CSV containing compound IDs")
+parser.add_argument("--output", default="/Users/mattbocc/uhn/annotationdb-seeding-testing copy/seeding/seeding_data/aug_27_2026/chembl_drug_indication.csv", help="Output CSV path")
+args = parser.parse_args()
+
+INPUT_CSV = args.input
+OUTPUT_CSV = args.output
+OUTPUT_DIR = os.path.dirname(OUTPUT_CSV)
 
 print(f"Connecting to SQLite Database: {DB_PATH}...")
 conn = sqlite3.connect(DB_PATH)
@@ -67,6 +74,8 @@ hier_df = pd.read_sql(hier_query, conn)
 conn.close()
 
 ind_df["inferred_from_parent"] = False
+ind_df["inferred_from_child"] = False
+ind_df["child_molecule_chembl_id"] = None
 
 # Build parent-child remap table
 print("Building parent-child remap table...")
@@ -76,21 +85,35 @@ hier_pairs = (
     .query("molecule_chembl_id != parent_molecule_chembl_id")
     .drop_duplicates()
 )
-remap_1 = hier_pairs.rename(columns={"molecule_chembl_id": "from_id", "parent_molecule_chembl_id": "to_id"})
-remap_2 = hier_pairs.rename(columns={"parent_molecule_chembl_id": "from_id", "molecule_chembl_id": "to_id"})
-remap_df = pd.concat([remap_1, remap_2]).drop_duplicates()
+# remap_child_to_parent: child's annotations → parent (parent receives child's data)
+remap_child_to_parent = hier_pairs.rename(columns={"molecule_chembl_id": "from_id", "parent_molecule_chembl_id": "to_id"})
+# remap_parent_to_child: parent's annotations → child (child receives parent's data)
+remap_parent_to_child = hier_pairs.rename(columns={"parent_molecule_chembl_id": "from_id", "molecule_chembl_id": "to_id"})
 
-def apply_remap(df, remap_df):
+def apply_remap_child_to_parent(df, remap_df):
+    """Child's annotations mapped to parent. Sets inferred_from_child=True, child_molecule_chembl_id=source child."""
+    remapped = df.merge(remap_df, left_on="molecule_chembl_id", right_on="from_id", how="inner")
+    remapped["child_molecule_chembl_id"] = remapped["from_id"]  # Track which child it came from
+    remapped["molecule_chembl_id"] = remapped["to_id"]
+    remapped["inferred_from_child"] = True
+    remapped["inferred_from_parent"] = False
+    remapped.drop(columns=["from_id", "to_id"], inplace=True)
+    return remapped
+
+def apply_remap_parent_to_child(df, remap_df):
+    """Parent's annotations mapped to child. Sets inferred_from_parent=True."""
     remapped = df.merge(remap_df, left_on="molecule_chembl_id", right_on="from_id", how="inner")
     remapped["molecule_chembl_id"] = remapped["to_id"]
-    # Inferred if the new ID is NOT the parent ID
-    remapped["inferred_from_parent"] = remapped["molecule_chembl_id"] != remapped["parent_molecule_chembl_id"]
+    remapped["inferred_from_parent"] = True
+    remapped["inferred_from_child"] = False
+    remapped["child_molecule_chembl_id"] = None
     remapped.drop(columns=["from_id", "to_id"], inplace=True)
     return remapped
 
 print(f"Remapping drug_indication ({len(ind_df):,} rows) via hierarchy...")
-ind_remapped = apply_remap(ind_df, remap_df)
-all_ind_df = pd.concat([ind_df, ind_remapped]).drop_duplicates(subset=["molecule_chembl_id", "drugind_id"])
+ind_from_child = apply_remap_child_to_parent(ind_df, remap_child_to_parent)
+ind_from_parent = apply_remap_parent_to_child(ind_df, remap_parent_to_child)
+all_ind_df = pd.concat([ind_df, ind_from_child, ind_from_parent]).drop_duplicates(subset=["molecule_chembl_id", "drugind_id"])
 print(f"\nCombined indication universe: {len(all_ind_df):,} rows  |  {all_ind_df['molecule_chembl_id'].nunique():,} distinct mols")
 
 # ── 4. Filter to query compounds from union_out.csv ──────────────────────────
@@ -132,6 +155,8 @@ COL_ORDER = [
     "usan_ref_ids",
     "inn_ref_ids",
     "inferred_from_parent",
+    "inferred_from_child",
+    "child_molecule_chembl_id",
 ]
 
 col_order = [c for c in COL_ORDER if c in final_ind_df.columns]
