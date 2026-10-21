@@ -86,7 +86,7 @@ def align_to_model(df: pd.DataFrame, model) -> pd.DataFrame:
     return df[[c for c in cols if c in df.columns]]
 
 
-compounds_df = pd.read_csv("seeding/seeding_data/july_30_2026/union_out.csv")
+compounds_df = pd.read_csv("seeding/seeding_data/aug_27_2026/union_out.csv")
 
 # Fix CID column: cast to nullable integer to prevent float ".0" artifacts
 compounds_df["cid"] = pd.to_numeric(compounds_df["cid"], errors="coerce").astype("Int64")
@@ -112,7 +112,7 @@ for annotation in atc_data.get("Annotations", []):
 cid_to_atc_str = {c: ";".join(sorted(codes)) for c, codes in cid_to_atc.items()}
 compounds_df["atc_code"] = compounds_df["cid"].map(cid_to_atc_str).fillna("")
 
-compounds_df.to_csv("seeding/seeding_data/july_30_2026/union_out.csv", index=False)
+compounds_df.to_csv("seeding/seeding_data/aug_27_2026/union_out.csv", index=False)
 matched_count = (compounds_df["atc_code"] != "").sum()
 
 print(
@@ -184,7 +184,7 @@ if "cid" in compounds_df.columns:
 
 compounds_df["fda_approval"] = compounds_df["chembl_max_phase"] == 4
 
-synonyms_df = pd.read_csv("seeding/seeding_data/july_30_2026/union_synonyms.csv")
+synonyms_df = pd.read_csv("seeding/seeding_data/aug_27_2026/union_synonyms.csv")
 
 # Remove any duplicate synonym entries based on cid/synonym combos
 if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
@@ -198,25 +198,25 @@ if {"synonym", "pubchem_cid"}.issubset(synonyms_df.columns):
     )
 
 compounds_bioassays_df = pd.read_csv(
-    "seeding/seeding_data/july_30_2026/union_bioassays.csv"
+    "seeding/seeding_data/aug_27_2026/union_bioassays.csv"
 )
 
 bioassays_df = pd.read_csv(
-    "seeding/seeding_data/july_30_2026/union_pubchem_assay_fields.csv"
+    "seeding/seeding_data/aug_27_2026/union_pubchem_assay_fields.csv"
 )
 
-toxicity_df = pd.read_csv("seeding/seeding_data/july_30_2026/toxicity_output_new.csv")
+toxicity_df = pd.read_csv("seeding/seeding_data/aug_27_2026/toxicity_output_new.csv")
 
 # ----- DIRIL (diril_dataset_508) -----
 diril_df = (
-    pd.read_csv("seeding/seeding_data/july_30_2026/diril_dataset_508.csv")
+    pd.read_csv("seeding/seeding_data/aug_27_2026/diril_dataset_508.csv")
     .rename(columns={"cid": "pubchem_cid", "My Findings  (Toxicity)": "toxicity"})
     .dropna(subset=["pubchem_cid"])
     .drop_duplicates(subset=["pubchem_cid"])
 )
 
 # ----- DICT_Rank (dictrank_dataset_508) -----
-dict_rank_df = pd.read_csv("seeding/seeding_data/july_30_2026/dictrank_dataset_508.csv")
+dict_rank_df = pd.read_csv("seeding/seeding_data/aug_27_2026/dictrank_dataset_508.csv")
 dict_rank_df = dict_rank_df.rename(columns=lambda x: x.strip())
 
 label_section_map = {
@@ -257,7 +257,7 @@ substance_mechanism_df = pd.read_csv(
     "data_extraction/drugs/pubchem/substance/output/combined/chembl_mechanism.csv"
 )
 
-chembl_mech_df = pd.read_csv("seeding/seeding_data/july_30_2026/chembl_mechanism.csv")
+chembl_mech_df = pd.read_csv("seeding/seeding_data/aug_27_2026/chembl_mechanism.csv")
 
 chembl_mech_df = pd.concat([chembl_mech_df, substance_mechanism_df], ignore_index=True)
 chembl_mech_df = chembl_mech_df.drop_duplicates()
@@ -277,7 +277,14 @@ print(
 )
 
 
-chembl_indication_df = pd.read_csv("seeding/seeding_data/july_30_2026/chembl_drug_indication.csv")
+substance_indication_df = pd.read_csv(
+    "data_extraction/drugs/pubchem/substance/output/combined/chembl_drug_indication.csv"
+)
+
+chembl_indication_df = pd.read_csv("seeding/seeding_data/aug_27_2026/chembl_drug_indication.csv")
+
+chembl_indication_df = pd.concat([chembl_indication_df, substance_indication_df], ignore_index=True)
+chembl_indication_df = chembl_indication_df.drop_duplicates()
 
 before_ind = len(chembl_indication_df)
 chembl_indication_df = chembl_indication_df[
