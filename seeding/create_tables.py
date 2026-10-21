@@ -364,7 +364,8 @@ class ChemblMechanism(Base):
         String(200),
         primary_key=True,
     )
-    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200))
+    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    child_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
     action_type: Mapped[str] = mapped_column(String(30))
     binding_site_comment: Mapped[str] = mapped_column(String(30))
     mechanism_of_action: Mapped[str] = mapped_column(Text())
@@ -396,6 +397,7 @@ class ChemblMechanism(Base):
     # activity_id: Mapped[str] = mapped_column(String(15))
     source: Mapped[str] = mapped_column(String(15))
     inferred_from_parent: Mapped[bool] = mapped_column(Boolean)
+    inferred_from_child: Mapped[bool] = mapped_column(Boolean, default=False)
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
@@ -418,6 +420,7 @@ class ChemblDrugIndication(Base):
         primary_key=True,
     )
     parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    child_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
     drugind_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     max_phase_for_ind: Mapped[str] = mapped_column(String(50), nullable=True)
     mesh_id: Mapped[str] = mapped_column(String(50))
@@ -431,6 +434,7 @@ class ChemblDrugIndication(Base):
     usan_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
     inn_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
     inferred_from_parent: Mapped[bool] = mapped_column(Boolean, default=False)
+    inferred_from_child: Mapped[bool] = mapped_column(Boolean, default=False)
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
@@ -558,6 +562,13 @@ class AntibodyDrugConjugates(Base):
     target_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
     target_synonym: Mapped[str] = mapped_column(Text(), nullable=True)
 
+    indications: Mapped[list["AdcIndications"]] = relationship(
+        "AdcIndications",
+        back_populates="adc",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
+
 
 class AdcIndications(Base):
     __tablename__ = "adc_indications"
@@ -569,6 +580,11 @@ class AdcIndications(Base):
     trial_ids: Mapped[str] = mapped_column(Text(), nullable=True)
     document: Mapped[str] = mapped_column(String(100), nullable=True)
     link: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    adc: Mapped["AntibodyDrugConjugates"] = relationship(
+        "AntibodyDrugConjugates",
+        back_populates="indications",
+    )
 
 
 
