@@ -148,6 +148,9 @@ def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
             v = v[:-2]
         return v
 
+    # Determine which columns are dedup keys (these are ID columns that should be clean integers)
+    key_cols = dedup_key if isinstance(dedup_key, list) else [dedup_key]
+
     if isinstance(dedup_key, list):
         key_fn = lambda row: tuple(clean_key(row.get(k, "")) for k in dedup_key)
     else:
@@ -157,6 +160,11 @@ def merge_file(spec: dict, batch_dirs: list[str], dry_run: bool):
     deduped: list[dict] = []
 
     for row in all_rows:
+        # Clean the actual row values for ID columns (strip ".0" artifacts)
+        for col in key_cols:
+            if col in row and row[col]:
+                row[col] = clean_key(row[col])
+
         k = key_fn(row)
         if k in seen:
             # If there's a merge field, merge it
