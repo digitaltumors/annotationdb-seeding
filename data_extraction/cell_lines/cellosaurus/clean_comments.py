@@ -152,6 +152,9 @@ def main(in_path: str, out_path: str):
     normalized = make_unique(normalized)
     out_df.columns = normalized
 
+    if "accession" in out_df.columns:
+        out_df = out_df.drop_duplicates(subset=["accession"])
+
     out_df.to_csv(out_path, index=False)
 
 
