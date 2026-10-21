@@ -1,0 +1,83 @@
+# docker-compose.local.yml
+# Runs 6 parallel shards of toxicity_extraction_input_ids.R locally via Docker.
+#
+# Equivalent to:
+#   for i in {0..5}; do
+#     docker run -d --name "annotationdb-tox-$i" \
+#       -v /path/to/union_out.csv:/data/union_out.csv:ro \
+#       -v /path/to/output:/data/output \
+#       annotationdb-tox $i 6
+#   done
+#
+# Prerequisites:
+#   1. Build the image:
+#        docker build -t annotationdb-tox .
+#   2. Place union_out.csv in ./input/
+#   3. Run all 6 shards simultaneously:
+#        docker compose -f docker-compose.local.yml up
+#
+# Output files (written to ./output/shard_N/):
+#   toxicity_output.csv   — pubchem_cid | dili_severity_grade | dili_annotation | hepatotoxicity_likelihood_score
+#   toxicity_errors.csv   — CIDs that failed (skipped on resume)
+
+x-tox-base: &tox-base
+  image: annotationdb-tox
+  entrypoint: ["Rscript", "/app/toxicity_extraction_input_ids.R"]
+  volumes:
+    - ./input/union_out.csv:/data/union_out.csv:ro
+    - ./output:/data/output
+  environment:
+    - TZ=America/Toronto
+
+services:
+  tox-shard-0:
+    <<: *tox-base
+    container_name: annotationdb-tox-0
+    command:
+      - "--union_out"
+      - "/data/union_out.csv"
+      - "--out_dir"
+      - "/data/output/shard_0"
+      - "--shard_index"
+      - "0"
+      - "--num_shards"
+      - "4"
+
+  tox-shard-1:
+    <<: *tox-base
+    container_name: annotationdb-tox-1
+    command:
+      - "--union_out"
+      - "/data/union_out.csv"
+      - "--out_dir"
+      - "/data/output/shard_1"
+      - "--shard_index"
+      - "1"
+      - "--num_shards"
+      - "4"
+
+  tox-shard-2:
+    <<: *tox-base
+    container_name: annotationdb-tox-2
+    command:
+      - "--union_out"
+      - "/data/union_out.csv"
+      - "--out_dir"
+      - "/data/output/shard_2"
+      - "--shard_index"
+      - "2"
+      - "--num_shards"
+      - "4"
+
+  tox-shard-3:
+    <<: *tox-base
+    container_name: annotationdb-tox-3
+    command:
+      - "--union_out"
+      - "/data/union_out.csv"
+      - "--out_dir"
+      - "/data/output/shard_3"
+      - "--shard_index"
+      - "3"
+      - "--num_shards"
+      - "4"

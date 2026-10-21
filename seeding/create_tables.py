@@ -14,8 +14,9 @@ class Compounds(Base):
     title: Mapped[str] = mapped_column(Text())
     mapped_name: Mapped[str] = mapped_column(Text())
     molecule_chembl_id: Mapped[str] = mapped_column(
-        String(200), unique=True, nullable=True
+        String(200), nullable=True
     )
+    molecule_chembl_id_from_synonyms: Mapped[bool] = mapped_column(Boolean, default=False)
     molecular_formula: Mapped[str] = mapped_column(String(300))
     molecular_weight: Mapped[str] = mapped_column(String(50))
     smiles: Mapped[str] = mapped_column(String(2000))
@@ -63,7 +64,10 @@ class Compounds(Base):
     literature_count: Mapped[int] = mapped_column(Integer)
     annotation_types: Mapped[str] = mapped_column(Text())
     annotation_type_count: Mapped[int] = mapped_column(Integer)
+    chembl_max_phase: Mapped[int] = mapped_column(Integer)
+    drug_like: Mapped[bool] = mapped_column(Boolean)
     fda_approval: Mapped[bool] = mapped_column(Boolean)
+    atc_code: Mapped[str] = mapped_column(String(7), nullable=True)
     date_added: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -77,7 +81,14 @@ class Compounds(Base):
         "ChemblMechanism",
         primaryjoin="Compounds.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
         back_populates="compound",
-        lazy="selectin",
+        lazy="noload",
+    )
+
+    drug_indications: Mapped[list["ChemblDrugIndication"]] = relationship(
+        "ChemblDrugIndication",
+        primaryjoin="Compounds.molecule_chembl_id == foreign(ChemblDrugIndication.molecule_chembl_id)",
+        back_populates="compound",
+        lazy="noload",
     )
 
     compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
@@ -90,16 +101,26 @@ class Compounds(Base):
         "BioAssays",
         secondary="compound_bioassays",
         back_populates="compounds",
-        lazy="selectin",
+        lazy="noload",
     )
 
-    toxicity: Mapped["Toxicity"] = relationship(
+    toxicity: Mapped[list["Toxicity"]] = relationship(
         "Toxicity",
         back_populates="compound",
-        uselist=False,
-        cascade="all, delete-orphan",
+        lazy="noload",
     )
 
+    diril_toxicity: Mapped["DIRIL_Toxicity"] = relationship(
+        "DIRIL_Toxicity",
+        back_populates="compound",
+        lazy="noload",
+    )
+
+    dict_rank_toxicity: Mapped["DICT_Rank_Toxicity"] = relationship(
+        "DICT_Rank_Toxicity",
+        back_populates="compound",
+        lazy="noload",
+    )
 
 class CompoundSynonyms(Base):
     __tablename__ = "compound_synonyms"
@@ -133,6 +154,16 @@ class CompoundBioAssays(Base):
         primary_key=True,
     )
 
+    # ORM Layer
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="compound_bioassays",
+    )
+    bioassay: Mapped["BioAssays"] = relationship(
+        "BioAssays",
+        back_populates="compound_bioassays",
+    )
+
 
 class BioAssays(Base):
     __tablename__ = "bioassays"
@@ -146,11 +177,22 @@ class BioAssays(Base):
     source_name: Mapped[str] = mapped_column(String(255))
     source_id: Mapped[str] = mapped_column(String(255))
     description_combined: Mapped[str] = mapped_column(Text)
-    protocol_combined: Mapped[str] = mapped_column(Text)
-    comment_combined: Mapped[str] = mapped_column(Text)
-    activity_outcome_method: Mapped[int] = mapped_column(Integer)
-    target_name: Mapped[str] = mapped_column(Text)
-    target_protein_accession: Mapped[str] = mapped_column(Text)
+    protocol_combined: Mapped[str] = mapped_column(Text, nullable=True)
+    comment_combined: Mapped[str] = mapped_column(Text, nullable=True)
+    activity_outcome_method: Mapped[int] = mapped_column(Integer, nullable=True)
+    target_name: Mapped[str] = mapped_column(Text, nullable=True)
+    target_protein_accession: Mapped[str] = mapped_column(Text, nullable=True)
+
+    compound_bioassays: Mapped[list["CompoundBioAssays"]] = relationship(
+        "CompoundBioAssays",
+        back_populates="bioassay",
+    )
+
+    compounds: Mapped[list["Compounds"]] = relationship(
+        "Compounds",
+        secondary="compound_bioassays",
+        back_populates="bioassays",
+    )
 
 
 class Toxicity(Base):
@@ -161,10 +203,60 @@ class Toxicity(Base):
         ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
         primary_key=True,
     )
-    dili_severity_grade: Mapped[int] = mapped_column(Integer)
-    dili_annotation: Mapped[str] = mapped_column(Text)
+    reference_number: Mapped[int] = mapped_column(Integer, nullable=True)
+    tox_dataset: Mapped[str] = mapped_column(String(100), primary_key=True)
+    dili_severity_grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    dili_annotation: Mapped[str] = mapped_column(Text, nullable=True)
+    tox_source_url: Mapped[str] = mapped_column(Text)
     hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score_reasoning: Mapped[str] = mapped_column(Text)
 
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="toxicity",
+    )
+
+class DIRIL_Toxicity(Base):
+    __tablename__ = "diril_toxicity"
+
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    description: Mapped[str] = mapped_column(String(2000))
+    product_name: Mapped[str] = mapped_column(String(100))
+    product_date: Mapped[str] = mapped_column(String(100))
+    product_country: Mapped[str] = mapped_column(String(100))
+    label_gong: Mapped[str] = mapped_column(String(50))
+    label_shi: Mapped[str] = mapped_column(String(50))
+    toxicity: Mapped[str] = mapped_column(String(50))
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="diril_toxicity",
+    )
+
+class DICT_Rank_Toxicity(Base):
+    __tablename__ = "dict_rank_toxicity"
+
+    pubchem_cid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("pubchem_compounds.cid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    trade_name: Mapped[str] = mapped_column(String(200))
+    active_ingredients: Mapped[str] = mapped_column(String(100))
+    cardiotoxicity: Mapped[str] = mapped_column(String(50))
+    label_section: Mapped[str] = mapped_column(String(50))
+    dic_severity_level: Mapped[str] = mapped_column(String(50))
+    dict_concern: Mapped[str] = mapped_column(String(50))
+    keywords: Mapped[str] = mapped_column(String(100))
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        back_populates="dict_rank_toxicity",
+    )
 
 # https://www.ebi.ac.uk/chembl/api/data/drug/schema?format=json
 # class ChemblDrugData(Base):
@@ -191,15 +283,89 @@ class Toxicity(Base):
 
 
 # https://www.ebi.ac.uk/chembl/api/data/mechanism/schema?format=json
+class Substances(Base):
+    __tablename__ = "substances"
+
+    sid: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    mapped_name: Mapped[str] = mapped_column(String(200))
+    molecule_chembl_id: Mapped[str] = mapped_column(String(200), unique=True, nullable=True)
+    chembl_max_phase: Mapped[int] = mapped_column(Integer)
+
+    synonyms: Mapped[list["SubstanceSynonyms"]] = relationship(
+        back_populates="substance", cascade="all, delete-orphan"
+    )
+
+    mechanisms: Mapped[list["ChemblMechanism"]] = relationship(
+        "ChemblMechanism",
+        primaryjoin="Substances.molecule_chembl_id == foreign(ChemblMechanism.molecule_chembl_id)",
+        back_populates="substance",
+        lazy="noload",
+    )
+
+    drug_indications: Mapped[list["ChemblDrugIndication"]] = relationship(
+        "ChemblDrugIndication",
+        primaryjoin="Substances.molecule_chembl_id == foreign(ChemblDrugIndication.molecule_chembl_id)",
+        back_populates="substance",
+        lazy="noload",
+    )
+
+
+    toxicity: Mapped[list["SubstanceToxicity"]] = relationship(
+        "SubstanceToxicity",
+        back_populates="substance",
+        lazy="noload",
+    )
+
+
+class SubstanceSynonyms(Base):
+    __tablename__ = "substance_synonyms"
+
+    synonym: Mapped[str] = mapped_column(String(700), primary_key=True)
+    sid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("substances.sid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # source: Mapped[str] = mapped_column(String(50))
+    version: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    ### ORM layer (fields below don't show up in table but are used in queries later on for convenience)
+    substance: Mapped["Substances"] = relationship(back_populates="synonyms")
+
+class SubstanceToxicity(Base):
+    __tablename__ = "substance_toxicity"
+
+    sid: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("substances.sid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    reference_number: Mapped[int] = mapped_column(Integer, nullable=True)
+    tox_dataset: Mapped[str] = mapped_column(String(100), primary_key=True)
+    dili_severity_grade: Mapped[int] = mapped_column(Integer, nullable=True)
+    dili_annotation: Mapped[str] = mapped_column(Text, nullable=True)
+    tox_source_url: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score: Mapped[str] = mapped_column(Text)
+    hepatotoxicity_likelihood_score_reasoning: Mapped[str] = mapped_column(Text)
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        back_populates="toxicity",
+    )
+
+
 class ChemblMechanism(Base):
     __tablename__ = "chembl_mechanism"
 
     molecule_chembl_id: Mapped[str] = mapped_column(
         String(200),
-        ForeignKey("pubchem_compounds.molecule_chembl_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200))
+    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    child_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
     action_type: Mapped[str] = mapped_column(String(30))
     binding_site_comment: Mapped[str] = mapped_column(String(30))
     mechanism_of_action: Mapped[str] = mapped_column(Text())
@@ -211,13 +377,16 @@ class ChemblMechanism(Base):
         Integer,
         primary_key=True,
     )
-    # mechanism_refs: Mapped[] = mapped_column() # best way to represent?
+    mechanism_refs: Mapped[str] = mapped_column(Text())
     molecular_mechanism: Mapped[int] = mapped_column(Integer)
     record_id: Mapped[int] = mapped_column(Integer)
     selectivity_comment: Mapped[str] = mapped_column(Text())
     site_id: Mapped[str] = mapped_column(Text())
     target_chembl_id: Mapped[str] = mapped_column(String(30))
-    # Fields below are extracted from the variant sequence object (if it exists [like does not])
+    target_name: Mapped[str] = mapped_column(Text())
+    prodrug: Mapped[bool] = mapped_column(Boolean)
+    parent_prodrug: Mapped[bool] = mapped_column(Boolean)
+    # Fields below are extracted from the variant sequence object
     variant_sequence_accession: Mapped[str] = mapped_column(String(50))
     variant_sequence_isoform: Mapped[int] = mapped_column(Integer)
     variant_sequence_mutation: Mapped[str] = mapped_column(String(50))
@@ -225,12 +394,202 @@ class ChemblMechanism(Base):
     variant_sequence_sequence: Mapped[str] = mapped_column(Text())
     variant_sequence_tax_id: Mapped[int] = mapped_column(Integer)
     variant_sequence_version: Mapped[int] = mapped_column(Integer)
+    # activity_id: Mapped[str] = mapped_column(String(15))
+    source: Mapped[str] = mapped_column(String(15))
+    inferred_from_parent: Mapped[bool] = mapped_column(Boolean)
+    inferred_from_child: Mapped[bool] = mapped_column(Boolean, default=False)
 
     compound: Mapped["Compounds"] = relationship(
         "Compounds",
         primaryjoin="foreign(ChemblMechanism.molecule_chembl_id) == Compounds.molecule_chembl_id",
         back_populates="mechanisms",
     )
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        primaryjoin="foreign(ChemblMechanism.molecule_chembl_id) == Substances.molecule_chembl_id",
+        back_populates="mechanisms",
+    )
+
+
+class ChemblDrugIndication(Base):
+    __tablename__ = "chembl_drug_indication"
+
+    molecule_chembl_id: Mapped[str] = mapped_column(
+        String(200),
+        primary_key=True,
+    )
+    parent_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    child_molecule_chembl_id: Mapped[str] = mapped_column(String(200), nullable=True)
+    drugind_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    max_phase_for_ind: Mapped[str] = mapped_column(String(50), nullable=True)
+    mesh_id: Mapped[str] = mapped_column(String(50))
+    mesh_heading: Mapped[str] = mapped_column(String(200))
+    efo_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    efo_term: Mapped[str] = mapped_column(String(200), nullable=True)
+    clinical_trials_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    daily_med_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    ema_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    fda_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    usan_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    inn_ref_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    inferred_from_parent: Mapped[bool] = mapped_column(Boolean, default=False)
+    inferred_from_child: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    compound: Mapped["Compounds"] = relationship(
+        "Compounds",
+        primaryjoin="foreign(ChemblDrugIndication.molecule_chembl_id) == Compounds.molecule_chembl_id",
+        back_populates="drug_indications",
+    )
+
+    substance: Mapped["Substances"] = relationship(
+        "Substances",
+        primaryjoin="foreign(ChemblDrugIndication.molecule_chembl_id) == Substances.molecule_chembl_id",
+        back_populates="drug_indications",
+    )
+
+
+class AntibodyDrugConjugates(Base):
+    __tablename__ = "antibody_drug_conjugates"
+
+    # Core ADC Required Identifiers (always present)
+    adc_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    adc_drug_name: Mapped[str] = mapped_column(String(255))
+    adc_name: Mapped[str] = mapped_column(String(255))
+    adc_phase: Mapped[str] = mapped_column(String(50))
+    adc_drug_status: Mapped[str] = mapped_column(String(255))
+    adc_detail_url: Mapped[str] = mapped_column(String(255))
+
+    adc_brand_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    adc_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_organization: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_drug_to_antibody_ratio: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_therapeutic_target: Mapped[str] = mapped_column(String(255), nullable=True)
+    adc_conjugate_type: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_combination_type: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_special_approvals: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_pubchem_sid: Mapped[int] = mapped_column(Integer, nullable=True)
+    adc_drugbank_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_chembl_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_drugmap_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_ttd_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_dresis_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_chebi_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    adc_absorption: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_distribution: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_metabolism: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_elimination: Mapped[str] = mapped_column(Text(), nullable=True)
+    adc_toxicity: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    antibody_name: Mapped[str] = mapped_column(String(255))
+    antibody_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_organization: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_indication: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_type: Mapped[str] = mapped_column(String(100), nullable=True)
+    antibody_subtype: Mapped[str] = mapped_column(String(100), nullable=True)
+    antibody_antigen_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antibody_chembl_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_drugbank_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_drug_central_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_pdb_id: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_approval_date: Mapped[str] = mapped_column(String(50), nullable=True)
+    antibody_brand_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antibody_heavy_chain_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_variable_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_constant_domain_3: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_hinge_region: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_heavy_chain_cdr_3: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_variable_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_constant_domain: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_1: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_2: Mapped[str] = mapped_column(Text(), nullable=True)
+    antibody_light_chain_cdr_3: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    payload_name: Mapped[str] = mapped_column(String(300))
+    payload_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    payload_synonyms: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_targets: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_formula: Mapped[str] = mapped_column(String(255), nullable=True)
+    payload_isosmiles: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
+    payload_inchi: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_inchikey: Mapped[str] = mapped_column(String(255), nullable=True)
+    payload_iupac_name: Mapped[str] = mapped_column(Text(), nullable=True)
+    payload_pharmaceutical_properties: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    linker_name: Mapped[str] = mapped_column(String(255))
+    linker_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    linker_type: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_antibody_linker_relation: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_structure: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_formula: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_isosmiles: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_pubchem_cid: Mapped[int] = mapped_column(Integer, nullable=True)
+    linker_inchi: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_inchikey: Mapped[str] = mapped_column(String(255), nullable=True)
+    linker_iupac_name: Mapped[str] = mapped_column(Text(), nullable=True)
+    linker_pharmaceutical_properties: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    antigen_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antigen_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_gene_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    antigen_gene_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    antigen_uniprot_entry: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_hgnc_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_kegg_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    antigen_family: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_function: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    antigen_synonym: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    target_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    target_gene_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    target_gene_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_uniprot_entry: Mapped[str] = mapped_column(String(255), nullable=True)
+    target_hgnc_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_kegg_id: Mapped[str] = mapped_column(String(50), nullable=True)
+    target_family: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_function: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_sequence: Mapped[str] = mapped_column(Text(), nullable=True)
+    target_synonym: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    indications: Mapped[list["AdcIndications"]] = relationship(
+        "AdcIndications",
+        back_populates="adc",
+        cascade="all, delete-orphan",
+        lazy="noload",
+    )
+
+
+class AdcIndications(Base):
+    __tablename__ = "adc_indications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    adc_id: Mapped[str] = mapped_column(String(50), ForeignKey("antibody_drug_conjugates.adc_id"))
+    name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(100))
+    trial_ids: Mapped[str] = mapped_column(Text(), nullable=True)
+    document: Mapped[str] = mapped_column(String(100), nullable=True)
+    link: Mapped[str] = mapped_column(Text(), nullable=True)
+
+    adc: Mapped["AntibodyDrugConjugates"] = relationship(
+        "AntibodyDrugConjugates",
+        back_populates="indications",
+    )
+
+
+
+
+
 
 
 # https://www.ebi.ac.uk/chembl/api/data/molecule/schema?format=json
@@ -403,3 +762,10 @@ class OncoTree(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+class ATCCodes(Base):
+    __tablename__ = "atc_codes"
+
+    code: Mapped[str] = mapped_column(String(7), primary_key=True)
+    description: Mapped[str] = mapped_column(Text())
+

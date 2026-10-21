@@ -13,3 +13,7 @@ sqlalchemy = ">=2.0.42,<3"
 python-dotenv = ">=1.1.1,<2"
 pymysql = ">=1.1.1,<2"
 pandas = ">=2.3.2,<3"
+requests = ">=2.32.5,<3"
+
+[pypi-dependencies]
+chembl-webresource-client = ">=0.10.9, <0.11"

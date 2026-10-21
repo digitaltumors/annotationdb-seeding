@@ -1,5 +1,5 @@
 library(data.table)
-f <- "output_data/union/complete/union_out.csv"
+f <- "output_data/union/mar-27-2026/union_out.csv"
 dt <- fread(f, colClasses = "character")
 before <- nrow(dt)
 dt <- dt[!is.na(inchikey) & nzchar(trimws(inchikey)) & !is.na(smiles) & nzchar(trimws(smiles))]

@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 
 # Base directory where the CSV files live
-BASE = Path("/Users/mattbocc/uhn/annotationdb-seeding-testing/data_extraction/drugs/pubchem/output_data/union/complete")
+BASE = Path("/Users/mattbocc/uhn/annotationdb-seeding-testing/data_extraction/drugs/pubchem/output_data/union/mar-27-2026")
 
 # Files we need to read for reference data
 UNION_OUT = BASE / "union_out.csv"
@@ -37,7 +37,7 @@ def clean_file(src: Path, key_cols: list[str], keep_predicate):
     bak = src.with_suffix(src.suffix + ".bak")
     tmp = src.with_suffix(src.suffix + ".tmp")
     shutil.copy2(src, bak)
-    print(f"Backed up {src.name} → {bak.name}")
+    print(f"Backed up {src.name} to {bak.name}")
 
     total_in = 0
     total_out = 0
@@ -51,7 +51,7 @@ def clean_file(src: Path, key_cols: list[str], keep_predicate):
                 writer.writerow(row)
                 total_out += 1
     tmp.replace(src)
-    print(f"{src.name}: {total_in:,} rows in → {total_out:,} rows out ({total_in - total_out:,} removed)")
+    print(f"{src.name}: {total_in:,} rows in to {total_out:,} rows out ({total_in - total_out:,} removed)")
 
 # 1. toxicity_output.csv – keep rows where pubchem_cid exists in union_out
 toxicity_path = BASE / "toxicity_output.csv"
@@ -70,6 +70,14 @@ clean_file(
         r.get("pubchem_cid", "").strip() in valid_cids
         and r.get("bioassay_aid", "").strip() in valid_aids
     ),
+)
+
+# 3. union_synonyms.csv – keep rows where pubchem_cid exists in union_out
+synonyms_path = BASE / "union_synonyms.csv"
+clean_file(
+    synonyms_path,
+    ["pubchem_cid"],
+    lambda r: r.get("pubchem_cid", "").strip() in valid_cids,
 )
 
 print("\nCleanup complete. Originals saved as .bak files.")
